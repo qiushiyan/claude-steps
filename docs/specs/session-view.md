@@ -1,6 +1,6 @@
 # claude-steps: a dated record of each Claude Code session, read from its transcript
 
-Status: the command is built in this repository (2026-10-02). The dotfiles wiring in § Delivery is not.
+Status: built (2026-10-02). The command is in this repository and installed on the laptop; the dotfiles carry the `prefix S` popup and the labels. Still open in § Delivery: the first run on the mini, and removing the `steps` mod.
 
 ## Summary
 
@@ -18,7 +18,7 @@ Boundary: nothing the tool does reaches the model of a working session; it never
 Boundary: the view states dated facts. It never says a check is done, passed or still valid.
 Boundary: Claude Code sessions only, and each machine shows its own sessions.
 Risk: Claude Code documents the transcript format as internal and free to change. The reader counts every fact two ways and says so on the view when the counts part.
-Open: two defaults in § Delivery wait on Qiushi; both belong to the dotfiles wiring.
+Open: the `steps` mod is removed only after the key has shown a real session on both machines.
 
 Where: § Behaviour describes what he sees; § Design carries the reader's rules, the premises and their evidence; § Verification numbers the obligations and names the test that pins each; § Delivery holds the repository boundary.
 
@@ -149,7 +149,7 @@ When a second trace shows a fact the reader's rule missed, the session view and 
 - **Live panes.** Owner: `internal/panes`, the only package that starts a process: `tmux list-panes`. Held by: obligation 14.
 - **Labels and paths.** Owner: `internal/config`.
 - **Rendering.** Owner: `internal/render`, pure functions from records to text or JSON, with the current time passed in.
-- **The popup.** Owner: a script in the dotfiles tmux package (unbuilt). It owns fzf, the key bindings and pane switching; it calls the command for every line it shows.
+- **The popup.** Owner: `~/dotfiles/tmux/.config/tmux/scripts/tmux-steps.sh`. It owns fzf, the key bindings and pane switching; it calls the command for every line it shows.
 
 ### API
 
@@ -254,7 +254,7 @@ With no file there are no label columns. The binary ships no labels: skill names
 - **Session to file.** A stat of `<session id>.jsonl` in every directory under `projects_dir`.
 - **Note path.** `claude-steps note` appends one line, `{"at": <RFC 3339>, "text": <string>}`, to `$XDG_STATE_HOME/claude-steps/notes/<session id>.jsonl` (default `~/.local/state`), opened in append mode and written in one call. If the file's last byte is not a newline, the line starts with one, so a write the system once cut short stays one unreadable line and never swallows the next note.
 - **Failure.** Every failure is a message on stderr and a non-zero exit.
-- **The popup** (unbuilt, dotfiles): the tmux key runs a script that opens a popup with fzf over `claude-steps board --ids`, hides the two id fields, previews `claude-steps show <session id>` scrolled to its end, starts with the cursor on the origin pane's row, switches to the row's pane on Enter after checking it still runs that session, and on ctrl-n takes one line through fzf used as a text field, as `~/dotfiles/tmux/.config/tmux/scripts/tmux-rename-pane.sh` does, and passes it to `claude-steps note <session id>`.
+- **The popup** (dotfiles, `prefix S`): the key runs `tmux-steps.sh`, which opens a popup with fzf over `claude-steps board --ids` and hides the two id fields. The preview is `claude-steps show <session id>`, scrolled to its end. The cursor starts on the origin pane's row and stays where it is when a note reloads the list. Enter switches the client to the row's pane if the pane still exists. ctrl-n takes one line through fzf used as a text field, as `~/dotfiles/tmux/.config/tmux/scripts/tmux-rename-pane.sh` does, and passes it to `claude-steps note <session id>`. Its design notes are in `~/dotfiles/tmux/.config/tmux/scripts/steps.md`, and `tests/test-steps-popup.py` beside it pins these behaviours on a private tmux socket.
 
 ### Rejected shapes
 
@@ -342,20 +342,14 @@ Limit: fixtures prove the rules against the shapes sampled on 2026-10-02. They d
 
 **Repository boundary.** Two repositories change, so this is two deliveries in a fixed order.
 
-1. `claude-steps` (this repository): the command, its tests, `make check` and `make install`, and the README. Built. The folder is not yet a git repository and nothing is installed.
-2. The dotfiles, after `make install` on the laptop:
-   - the popup script and its key in the tmux package, as § Design — Wiring describes it, and the key's line in the tmux documentation;
-   - a stow package holding `config.toml` with the labels;
-   - `mini-sync`: the binary in its copied-binaries list and the config package in its stowed list;
-   - `claude-tomini`: carry the session's notes file with its transcript, appending to a notes file the mini already has;
-   - removal of the `steps` mod: its directory, its entry in `CLAUDE_CODE_PLUGIN_DIRS` in `~/dotfiles/claude/.claude/settings.json`, its section and its "sessions already running" note in `~/dotfiles/docs/claude-mods.md`, the `steps` line in `~/dotfiles/CLAUDE.md`, and that document's mods-loaded probe moved from `/did` to another mod's command;
-   - `~/dotfiles/docs/qiushi-mini.md`: the `tabtype` package stays stowed on the mini, now for this command's snippet matching.
+1. `claude-steps` (this repository): the command, its tests, `make check` and `make install`, and the README. Done, and installed on the laptop.
+2. The dotfiles:
+   - done: the popup script, its `prefix S` key, its design note and its test in the tmux package; the `claude-steps` stow package holding `config.toml` with the labels; `mini-sync` carrying the binary and the package; `claude-tomini` merging the session's notes into the mini's; the board in the tmux workflow document and the testing routes; `~/dotfiles/docs/qiushi-mini.md` saying what the `tabtype` package is now stowed for;
+   - open: the first `prefix S` on the mini after `mini-sync` has run there;
+   - open, last: removal of the `steps` mod: its directory, its entry in `CLAUDE_CODE_PLUGIN_DIRS` in `~/dotfiles/claude/.claude/settings.json`, its section and its "sessions already running" note in `~/dotfiles/docs/claude-mods.md`, the `steps` line in `~/dotfiles/CLAUDE.md`, and that document's mods-loaded probe moved from `/did` to another mod's command.
 
-The mod is removed last, after the key has shown a real session on both machines. Sessions already running keep the mod until they restart.
+The mod is removed after the key has shown a real session on both machines. Sessions already running keep the mod until they restart.
 
 **After it ships.** Re-run the session-history query for "did we / have we" step questions (`q-candidates.mjs` in the design session's scratchpad) over a calendar month of sessions started after the key exists, and report the rate per long session beside September 2026's: 6 questions across 170 long sessions on the laptop. The rate says whether the questions still get asked. It does not say whether the view was opened.
 
-**Defaults to confirm.**
-
-- Choice: the tmux key. Recommendation: `prefix S`, unbound today. Owner: Qiushi. Waits on it: the dotfiles binding.
-- Choice: the label set. Recommendation: consult, review, verify, docs, prompts, with handoff skills under docs and `handoff-for-review` under no label, since it asks a later session to review. Owner: Qiushi. Waits on it: the dotfiles `config.toml`.
+**Defaults, confirmed by Qiushi on 2026-10-02.** The key is `prefix S`. The labels are consult, review, verify, docs and prompts, with handoff skills under docs and the `handoff-for-review` snippet under no label, since it asks a later session to review.
