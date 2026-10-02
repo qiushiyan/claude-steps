@@ -1,6 +1,6 @@
 # claude-steps: a dated record of each Claude Code session, read from its transcript
 
-Status: built (2026-10-02). The command is in this repository and installed on the laptop; the dotfiles carry the `prefix S` popup and the labels. Still open in § Delivery: the first run on the mini, and removing the `steps` mod.
+Status: built (2026-10-02). The command is in this repository and installed on the laptop; the dotfiles carry the `prefix S` popup and the labels. The `steps` mod is removed. Still open in § Delivery: the first run on the mini.
 
 ## Summary
 
@@ -12,13 +12,13 @@ Failure: a yes or no does not say when the step ran or what was committed since,
 Goal: he presses one tmux key and reads, for every Claude session on the machine, what ran, when, and what was committed since.
 Goal: he keeps free-form notes per session and sees them whenever he opens the view.
 Change: a Go command, `claude-steps`, reads tmux and the session's transcript file and prints a board and a per-session timeline.
-Change: the `steps` mod in the dotfiles (band, `/steps`, `/did`) is removed once the command is wired in.
+Change: the `steps` mod in the dotfiles (band, `/steps`, `/did`) is removed.
 
 Boundary: nothing the tool does reaches the model of a working session; it never writes to a session, and it makes no model call.
 Boundary: the view states dated facts. It never says a check is done, passed or still valid.
 Boundary: Claude Code sessions only, and each machine shows its own sessions.
 Risk: Claude Code documents the transcript format as internal and free to change. The reader counts every fact two ways and says so on the view when the counts part.
-Open: the `steps` mod is removed only after the key has shown a real session on both machines.
+Open: the key has not yet been pressed on the mini.
 
 Where: § Behaviour describes what he sees; § Design carries the reader's rules, the premises and their evidence; § Verification numbers the obligations and names the test that pins each; § Delivery holds the repository boundary.
 
@@ -346,9 +346,9 @@ Limit: fixtures prove the rules against the shapes sampled on 2026-10-02. They d
 2. The dotfiles:
    - done: the popup script, its `prefix S` key, its design note and its test in the tmux package; the `claude-steps` stow package holding `config.toml` with the labels; `mini-sync` carrying the binary and the package; `claude-tomini` merging the session's notes into the mini's; the board in the tmux workflow document and the testing routes; `~/dotfiles/docs/qiushi-mini.md` saying what the `tabtype` package is now stowed for;
    - open: the first `prefix S` on the mini after `mini-sync` has run there;
-   - open, last: removal of the `steps` mod: its directory, its entry in `CLAUDE_CODE_PLUGIN_DIRS` in `~/dotfiles/claude/.claude/settings.json`, its section and its "sessions already running" note in `~/dotfiles/docs/claude-mods.md`, the `steps` line in `~/dotfiles/CLAUDE.md`, and that document's mods-loaded probe moved from `/did` to another mod's command.
+   - done: the `steps` mod is removed, at Qiushi's word on 2026-10-02 and ahead of the mini's first run: its directory, its entry in `CLAUDE_CODE_PLUGIN_DIRS`, and its section in `~/dotfiles/docs/claude-mods.md`, whose mods-loaded probe is now `/quota`.
 
-The mod is removed after the key has shown a real session on both machines. Sessions already running keep the mod until they restart.
+A session that was running with the mod keeps what it had loaded until it restarts.
 
 **After it ships.** Re-run the session-history query for "did we / have we" step questions (`q-candidates.mjs` in the design session's scratchpad) over a calendar month of sessions started after the key exists, and report the rate per long session beside September 2026's: 6 questions across 170 long sessions on the laptop. The rate says whether the questions still get asked. It does not say whether the view was opened.
 
