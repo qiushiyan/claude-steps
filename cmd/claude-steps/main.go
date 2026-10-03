@@ -108,6 +108,11 @@ func (a *app) run(args []string) int {
 		fmt.Fprintf(a.stderr, "claude-steps: unknown command %q\n\n%s", cmd, usage)
 		return 2
 	}
+	// Help needs no configuration, so a broken file cannot hide it.
+	if asksHelp(rest) {
+		fmt.Fprint(a.stdout, usage)
+		return 0
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(a.stderr, "claude-steps: %v\n", err)
@@ -116,18 +121,25 @@ func (a *app) run(args []string) int {
 	home, _ := os.UserHomeDir()
 	s := session{cfg: cfg, loader: record.NewLoader(cfg), view: render.View{Now: a.now(), Home: home}}
 	if err := run(s, rest); err != nil {
-		if errors.Is(err, errHelp) {
-			fmt.Fprint(a.stdout, usage)
-			return 0
-		}
 		fmt.Fprintf(a.stderr, "claude-steps: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-// errHelp is returned by flags when the arguments ask for the usage.
-var errHelp = errors.New("help")
+// asksHelp reports whether -h or --help comes before any "--". After it, a
+// note may read like an option.
+func asksHelp(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "--":
+			return false
+		case "-h", "--help":
+			return true
+		}
+	}
+	return false
+}
 
 // session is what one invocation works with.
 type session struct {
@@ -151,9 +163,6 @@ func flags(args []string, known ...string) (map[string]bool, []string, error) {
 	for i, arg := range args {
 		if arg == "--" {
 			return set, append(rest, args[i+1:]...), nil
-		}
-		if arg == "-h" || arg == "--help" {
-			return nil, nil, errHelp
 		}
 		if !strings.HasPrefix(arg, "--") {
 			rest = append(rest, arg)

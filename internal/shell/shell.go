@@ -142,7 +142,15 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 		w.guard++
 		defer func() { w.guard-- }()
 	}
+	// A redirection's word and an unquoted here-document expand before the
+	// command runs.
 	for _, r := range s.Redirs {
+		if r.Word != nil {
+			w.substitutions(r.Word, sc)
+		}
+		if r.Hdoc != nil {
+			w.substitutions(r.Hdoc, sc)
+		}
 		switch {
 		case r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc:
 			in = input{set: true}
@@ -186,8 +194,18 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 		w.stmts(c.Cond, sc, in)
 		w.guarded(func() { w.stmts(c.Do, sc, in) })
 	case *syntax.ForClause:
+		w.substitutions(c.Loop, sc)
 		w.guarded(func() { w.stmts(c.Do, sc, in) })
+	case *syntax.TestClause:
+		w.substitutions(c.X, sc)
+	case *syntax.ArithmCmd:
+		w.substitutions(c.X, sc)
+	case *syntax.LetClause:
+		for _, x := range c.Exprs {
+			w.substitutions(x, sc)
+		}
 	case *syntax.CaseClause:
+		w.substitutions(c.Word, sc)
 		w.guarded(func() {
 			for _, item := range c.Items {
 				w.stmts(item.Stmts, sc, in)
@@ -269,8 +287,15 @@ func (w *walker) call(c *syntax.CallExpr, sc *scope, in input) {
 		w.depth--
 		return
 	}
-	if name == "cd" && len(words) == first+2 {
-		sc.dir = join(sc.dir, words[first+1])
+	// zsh's precommand modifiers run the builtin in this shell. `command cd`
+	// would too in bash; zsh's command runs an external program, which moves
+	// nothing.
+	at := first
+	for at+1 < len(words) && (words[at] == "noglob" || words[at] == "nocorrect" || words[at] == "builtin") {
+		at++
+	}
+	if words[at] == "cd" && len(words) == at+2 {
+		sc.dir = join(sc.dir, words[at+1])
 	}
 	w.out = append(w.out, Command{Words: words, Stdin: in.body, HasStdin: in.set, Dir: sc.dir, Guarded: w.guard > 0})
 }
@@ -293,11 +318,17 @@ func (w *walker) assign(list []*syntax.Assign) {
 	}
 }
 
-// substitutions walks the commands inside a word's command substitutions.
-func (w *walker) substitutions(word *syntax.Word, sc *scope) {
-	syntax.Walk(word, func(n syntax.Node) bool {
-		if cs, ok := n.(*syntax.CmdSubst); ok {
-			w.stmts(cs.Stmts, sc.fork(), input{})
+// substitutions walks the commands inside the command and process
+// substitutions of a word, a test or a loop's word list. Each runs in a
+// scope of its own.
+func (w *walker) substitutions(n syntax.Node, sc *scope) {
+	syntax.Walk(n, func(n syntax.Node) bool {
+		switch s := n.(type) {
+		case *syntax.CmdSubst:
+			w.stmts(s.Stmts, sc.fork(), input{})
+			return false
+		case *syntax.ProcSubst:
+			w.stmts(s.Stmts, sc.fork(), input{})
 			return false
 		}
 		return true

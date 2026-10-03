@@ -82,6 +82,9 @@ func (s Store) Load(id string) (notes []Note, bad int, err error) {
 	if err != nil {
 		return nil, 0, fmt.Errorf("cannot read the notes for %s: %w", id, err)
 	}
+	// Two imports that raced can each append the same note, interleaved
+	// with others at the same time; it is read once.
+	seen := map[string]bool{}
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
@@ -91,11 +94,18 @@ func (s Store) Load(id string) (notes []Note, bad int, err error) {
 			bad++
 			continue
 		}
-		notes = append(notes, n)
+		if !seen[key(n)] {
+			seen[key(n)] = true
+			notes = append(notes, n)
+		}
 	}
 	slices.SortStableFunc(notes, func(a, b Note) int { return a.At.Compare(b.At) })
-	notes = slices.CompactFunc(notes, func(a, b Note) bool { return a.At.Equal(b.At) && a.Text == b.Text })
 	return notes, bad, nil
+}
+
+// key is what makes two notes the same note.
+func key(n Note) string {
+	return n.At.UTC().Format(time.RFC3339Nano) + "\x00" + n.Text
 }
 
 // Import adds the notes in r, one JSON note per line as this package writes
@@ -108,7 +118,7 @@ func (s Store) Import(id string, r io.Reader) (added, bad int, err error) {
 	}
 	held := map[string]bool{}
 	for _, n := range have {
-		held[n.At.UTC().Format(time.RFC3339Nano)+"\x00"+n.Text] = true
+		held[key(n)] = true
 	}
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -124,11 +134,10 @@ func (s Store) Import(id string, r io.Reader) (added, bad int, err error) {
 			bad++
 			continue
 		}
-		key := n.At.UTC().Format(time.RFC3339Nano) + "\x00" + n.Text
-		if held[key] {
+		if held[key(n)] {
 			continue
 		}
-		held[key] = true
+		held[key(n)] = true
 		encoded, err := json.Marshal(Note{At: n.At.UTC(), Text: n.Text})
 		if err != nil {
 			return 0, bad, err

@@ -104,6 +104,14 @@ func TestImport(t *testing.T) {
 	if notes, _, _ := store.Load(id); len(notes) != 2 {
 		t.Errorf("a repeated line was read twice: %+v", notes)
 	}
+	// Repeats interleaved with another note at the same time are read once
+	// too: two imports that raced each appended both.
+	same := Store{Dir: t.TempDir()}
+	pair := `{"at":"2026-10-01T09:00:00Z","text":"A"}` + "\n" + `{"at":"2026-10-01T09:00:00Z","text":"B"}` + "\n"
+	os.WriteFile(filepath.Join(same.Dir, id+".jsonl"), []byte(pair+pair), 0o644)
+	if notes, _, _ := same.Load(id); len(notes) != 2 || notes[0].Text != "A" || notes[1].Text != "B" {
+		t.Errorf("interleaved repeats: %+v", notes)
+	}
 
 	var wg sync.WaitGroup
 	for i := range 32 {

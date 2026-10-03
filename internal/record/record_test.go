@@ -317,6 +317,10 @@ func TestDirectoryOfACommit(t *testing.T) {
 	tr.Bash(`git -C ../lib commit -m "d"`, "")
 	tr.Bash(`cd /work/app && git commit -m "e"`, "")
 	tr.Bash(`x=$(cd /tmp && pwd); git commit -m "f"`, "")
+	// zsh's precommand modifiers run the builtin itself; command cd does too
+	// in bash, but not in zsh, the shell the Bash tool runs.
+	tr.Bash(`noglob cd /work/g; git commit -m "g"`, "")
+	tr.Bash(`builtin cd /work/h && git commit -m "h"`, "")
 	want(t, load(t, tr),
 		"commit | a | /work/other",
 		"commit | b",
@@ -324,6 +328,28 @@ func TestDirectoryOfACommit(t *testing.T) {
 		"commit | d | /work/lib",
 		"commit | e",
 		"commit | f",
+		"commit | g | /work/g",
+		"commit | h | /work/h",
+	)
+}
+
+// A command substitution runs wherever its word is expanded: in a test, a
+// loop's word list, a redirection or a here-document; so does a process
+// substitution.
+func TestCommandsInsideExpansionsRun(t *testing.T) {
+	tr := fixture.New()
+	tr.Bash(`[[ $(envoy collect review-r1 --result-only) = x ]]`, "findings")
+	tr.Bash(`diff <(envoy collect review-r2 --result-only) result.md`, "")
+	tr.Bash(`for s in $(git commit -qm "in a loop header" && echo ok); do :; done`, "")
+	tr.Bash(`echo x > "$(git commit -qm "in a redirection"; echo out)"`, "")
+	tr.Bash("cat <<EOF\n$(git commit -qm \"in a here-document\")\nEOF", "")
+	tr.Bash("cat <<'EOF'\n$(git commit -qm \"quoted, so literal\")\nEOF", "")
+	want(t, load(t, tr),
+		"round | review-r1 | collected",
+		"round | review-r2 | collected",
+		"commit | in a loop header",
+		"commit | in a redirection",
+		"commit | in a here-document",
 	)
 }
 

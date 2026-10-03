@@ -434,6 +434,33 @@ func TestLiveSessionWithNoTranscriptTakesANote(t *testing.T) {
 	contains(t, w.ok("show", "cccccccc"), "noted before the first prompt")
 }
 
+// Help needs no configuration: a broken file cannot hide the usage.
+func TestHelpNeedsNoConfiguration(t *testing.T) {
+	w := newWorld(t)
+	fixture.WriteFile(t, filepath.Join(w.home, ".config", "claude-steps", "config.toml"), []byte("[[label]]\nskils = 1\n"))
+	if out, errb, code := w.run("show", "--help"); code != 0 || !strings.Contains(out, "claude-steps show") {
+		t.Errorf("show --help with a broken configuration: exit %d, %q, %q", code, out, errb)
+	}
+	if _, errb, code := w.run("show", "%1"); code == 0 || !strings.Contains(errb, "skils") {
+		t.Errorf("a broken configuration was not reported: exit %d, %q", code, errb)
+	}
+}
+
+// A dispatch that failed says so, and a fact with no time says that rather
+// than borrowing one.
+func TestFailedRunAndUnknownTimeAreSaid(t *testing.T) {
+	w := newWorld(t)
+	id := fixture.ID("abcdabcd")
+	tr := fixture.New()
+	tr.Raw(fixture.Row{"type": "pr-link", "prNumber": 4, "prUrl": "https://github.com/acme/app/pull/4", "prRepository": "acme/app"})
+	tr.BashError("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Exit code 2\nenvoy: no such voice")
+	tr.Write(t, w.projects, "-work-app", id)
+	contains(t, w.ok("show", id),
+		"at an unknown time   PR #4 linked  acme/app",
+		"review-r1  run returned an error",
+	)
+}
+
 // Notes another machine kept for the session are merged from stdin.
 func TestImportNotes(t *testing.T) {
 	w := newWorld(t)
