@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"maps"
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,7 +81,7 @@ var (
 	jobLine    = regexp.MustCompile(`(?m)^job:[ \t]*\S`)
 	// "[main 1a2b3c4] subject", the line git prints for a commit it made.
 	gitSummary = regexp.MustCompile(`(?m)^\[[^\]\s]+( \([^)]*\))? [0-9a-f]{7,40}\] `)
-	pullURL    = regexp.MustCompile(`https://github\.com/[\w.-]+/[\w.-]+/pull/\d+`)
+	pullURL    = regexp.MustCompile(`https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)`)
 	jobReuse   = regexp.MustCompile(`\+\d+$`)
 	skillFile  = regexp.MustCompile(`(?:^|/)skills/([^/]+)/SKILL\.md$`)
 	envoyCall  = regexp.MustCompile(`\benvoy\s+(run|collect)\b`)
@@ -151,7 +153,7 @@ type decoder struct {
 	bash       map[string]*bashCall // Bash tool call id → what it ran
 	rounds     map[string]int       // envoy job → its latest round event
 	prs        map[string]int       // pull request URL → its event
-	created    map[string]bool      // URLs `gh pr create` returned
+	created    map[string]time.Time // URLs `gh pr create` returned → the call
 	slash      *slashCommand        // a slash command waiting for its expansion
 	sawOrigin  bool
 	unsourced  []prompt // prompts with no origin, used when no row carries one
@@ -174,7 +176,7 @@ func newDecoder(rec *Record, snippets []config.Snippet, mentions []mention) *dec
 		bash:       map[string]*bashCall{},
 		rounds:     map[string]int{},
 		prs:        map[string]int{},
-		created:    map[string]bool{},
+		created:    map[string]time.Time{},
 	}
 }
 
@@ -309,13 +311,14 @@ func (d *decoder) assistant(at time.Time, blocks []block) bool {
 			d.sig.tool.Primary++
 		case "Bash":
 			var in struct {
-				Command string `json:"command"`
+				Command    string `json:"command"`
+				Background bool   `json:"run_in_background"`
 			}
 			if json.Unmarshal(b.Input, &in) != nil {
 				ok = false
 				continue
 			}
-			d.bash[b.ID] = d.bashCommand(at, in.Command)
+			d.bash[b.ID] = d.bashCommand(at, in.Command, in.Background)
 		case "Read":
 			// Asked to "follow skills/x/SKILL.md", the model reads the file
 			// and no skill loads. The read is the only trace of it.
@@ -347,7 +350,9 @@ func within(dir, arg string) string {
 
 // bashCommand records what a Bash call ran. Round events are added now, at
 // the dispatch; commits wait for the result, which says whether they happened.
-func (d *decoder) bashCommand(at time.Time, command string) *bashCall {
+// A call the tool ran in the background returns before anything in it has
+// finished, so each of its commits is guarded.
+func (d *decoder) bashCommand(at time.Time, command string, background bool) *bashCall {
 	call := &bashCall{at: at, mentionsCommit: strings.Contains(command, "commit"), mentionsEnvoy: envoyCall.MatchString(command)}
 	// Text that does not parse yields no commands; a commit or round in it
 	// shows as a miss in the second traces below.
@@ -358,6 +363,7 @@ func (d *decoder) bashCommand(at time.Time, command string) *bashCall {
 			if commit.dir = within(c.Dir, commit.dir); commit.dir == d.cwd {
 				commit.dir = ""
 			}
+			commit.guarded = c.Guarded || background
 			call.commits = append(call.commits, commit)
 		}
 		if job, ok := envoyJob(argv, "run"); ok {
@@ -405,15 +411,15 @@ func (d *decoder) user(at time.Time, r row, text string, blocks []block) {
 	}
 
 	trimmed := strings.TrimSpace(text)
+	expansion := strings.HasPrefix(trimmed, skillExpansion)
 	follows := waiting != nil && r.IsMeta && !r.IsCompactSummary && waiting.promptID == r.PromptID
-	if waiting != nil && !(follows && !strings.HasPrefix(trimmed, "<")) {
+	if waiting != nil && !(follows && expansion) {
 		d.unexpanded(waiting)
 	}
 	switch {
 	case r.IsCompactSummary:
 		d.sig.compaction.Second++
 	case r.IsMeta:
-		expansion := strings.HasPrefix(trimmed, skillExpansion)
 		switch {
 		case expansion && r.SourceToolUseID != "":
 			d.sig.tool.Second++
@@ -427,8 +433,10 @@ func (d *decoder) user(at time.Time, r row, text string, blocks []block) {
 			}
 		}
 		// The skill's name comes from the command the user typed. The
-		// expansion only proves that the command was a skill.
-		if follows && !strings.HasPrefix(trimmed, "<") {
+		// expansion only proves that the command was a skill. A built-in
+		// such as /init answers with a meta prompt of its own, which does not
+		// open with the skill's line.
+		if follows && expansion {
 			d.add(Event{At: waiting.at, Kind: Skill, Via: "slash", Name: waiting.name, Args: clip(waiting.args, argsMax)})
 			d.sig.slash.Primary++
 		}
@@ -521,9 +529,12 @@ func (d *decoder) result(at time.Time, b block) {
 
 	// A call that returned an error made no commit, unless git's own summary
 	// line is in the output: the commit succeeded and a later command failed.
+	// A guarded commit may have been skipped by a call that succeeded, so it
+	// counts on the summary line alone. Most commits run with -q and print
+	// none, which is why an unguarded one needs only the call's success.
 	committed := gitSummary.MatchString(text)
-	if len(call.commits) > 0 && (!b.IsError || committed) {
-		for _, c := range call.commits {
+	for _, c := range call.commits {
+		if committed || !b.IsError && !c.guarded {
 			d.add(Event{At: call.at, Kind: Commit, Text: c.subject, Amend: c.amend, Dir: c.dir})
 			d.sig.commit.Primary++
 		}
@@ -558,7 +569,9 @@ func (d *decoder) result(at time.Time, b block) {
 
 	if call.createsPR && !b.IsError {
 		for _, url := range pullURL.FindAllString(text, -1) {
-			d.created[url] = true
+			if _, seen := d.created[url]; !seen {
+				d.created[url] = call.at
+			}
 		}
 	}
 }
@@ -616,13 +629,21 @@ func (d *decoder) finish() {
 		}
 	}
 	for url, idx := range d.prs {
-		d.rec.Events[idx].OpenedHere = d.created[url]
+		_, d.rec.Events[idx].OpenedHere = d.created[url]
 	}
+	// Claude Code now and then writes no link row for a pull request it saw
+	// created. The URL gh printed is the pull request; the missing row still
+	// counts as a miss, since check watches the format.
 	d.sig.pr.Primary, d.sig.pr.Second = len(d.prs), len(d.created)
-	for url := range d.created {
-		if _, linked := d.prs[url]; !linked {
-			d.sig.pr.Missed++
+	for _, url := range slices.Sorted(maps.Keys(d.created)) {
+		if _, linked := d.prs[url]; linked {
+			continue
 		}
+		m := pullURL.FindStringSubmatch(url)
+		number, _ := strconv.Atoi(m[2])
+		d.add(Event{At: d.created[url], Kind: PR, Repo: m[1], Number: number, URL: url, OpenedHere: true})
+		d.sig.pr.Missed++
+		d.sig.pr.Filled++
 	}
 	if extra := d.sig.compaction.Second - d.sig.compaction.Primary; extra > 0 {
 		d.sig.compaction.Missed = extra
@@ -669,6 +690,7 @@ type commitCommand struct {
 	subject string
 	amend   bool
 	dir     string // the argument of git -C
+	guarded bool   // it may not have run although the call succeeded
 }
 
 // Options of git itself that take a separate value, before the subcommand.

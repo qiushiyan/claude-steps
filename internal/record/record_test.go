@@ -133,6 +133,20 @@ func TestBuiltinSharingAPromptIDWithALaterExpansionIsNotASkill(t *testing.T) {
 	}
 }
 
+// A built-in command that answers with a prompt of its own, such as /init,
+// is followed by a meta row as a skill is, without the skill's opening line.
+func TestPromptBuiltinIsNotASkill(t *testing.T) {
+	tr := fixture.New()
+	for _, name := range []string{"init", "review"} {
+		prompt := tr.SlashOnly(name, "")
+		tr.Raw(fixture.Row{"type": "user", "timestamp": "2026-10-01T09:05:00.000Z", "promptId": prompt, "isMeta": true,
+			"message": fixture.Row{"content": []fixture.Row{{"type": "text", "text": "Please analyze this codebase and create a CLAUDE.md file"}}}})
+	}
+	rec := load(t, tr)
+	// "review" is a labelled name: typed and not loaded, it is the user's words.
+	want(t, rec, "mention | review | /review")
+}
+
 // Obligation 2.
 func TestFailedSkillCall(t *testing.T) {
 	tr := fixture.New().Prompt("go")
@@ -274,6 +288,25 @@ func TestCommitIsACommandNotAWord(t *testing.T) {
 	}
 }
 
+// A call that succeeded proves a commit only when the commit had to run. One
+// that ran on a branch, after ||, in an if, case or loop, or in the
+// background counts on git's own summary line alone.
+func TestGuardedCommitNeedsGitsOwnLine(t *testing.T) {
+	tr := fixture.New()
+	tr.Bash("git diff --cached --quiet || git commit -qm skipped", "")
+	tr.Bash(`if [ -n "$(git status --porcelain)" ]; then git commit -qam maybe; fi`, "")
+	tr.Bash("for f in a b; do git commit -qm \"$f\" -- \"$f\"; done", "")
+	tr.Bash("git commit -qm later &", "")
+	tr.BashBackground(`git commit -qm "in a background call"`)
+	tr.Bash("git diff --cached --quiet || git commit -m shown", "[main 1a2b3c4] shown\n 1 file changed")
+	tr.Bash(`cd /work/app || exit 1; git commit -qm "after a guard"`, "")
+	rec := load(t, tr)
+	want(t, rec,
+		"commit | shown",
+		"commit | after a guard",
+	)
+}
+
 // A commit made somewhere other than the session's directory says where.
 // A cd inside a subshell does not move the commands after it (review r1).
 func TestDirectoryOfACommit(t *testing.T) {
@@ -373,6 +406,26 @@ func TestPullRequests(t *testing.T) {
 	)
 	if got := len(rec.PullRequests()); got != 3 {
 		t.Errorf("pull requests: %d", got)
+	}
+}
+
+// Claude Code now and then writes no link row for a pull request it saw
+// created. The URL gh printed is the pull request, dated at the call; a link
+// row that comes later is the same pull request.
+func TestCreatedPullRequestWithNoLinkRow(t *testing.T) {
+	tr := fixture.New()
+	tr.Bash(`gh pr create --fill`, "https://github.com/acme/app/pull/12")
+	tr.Bash(`gh pr create --fill`, "https://github.com/acme/app/pull/13")
+	tr.PRLink("acme/app", 13)
+	rec := load(t, tr)
+	want(t, rec,
+		"pr | acme/app | #12 | opened-here",
+		"pr | acme/app | #13 | opened-here",
+	)
+	// The missing link row still counts for check, which watches the format,
+	// but the view has nothing to warn about: the pull request is shown.
+	if s := signal(rec, "pull request"); s.Missed != 1 || len(rec.Missed()) != 0 {
+		t.Errorf("signal %+v, view caveats %+v", s, rec.Missed())
 	}
 }
 
@@ -622,7 +675,8 @@ func TestSignalsCountWhatTheReaderMissed(t *testing.T) {
 			t.Errorf("%s: missed %d, want 1 (%+v)", fact, s.Missed, s)
 		}
 	}
-	if len(rec.Missed()) != 7 {
+	// The pull request is shown from its URL, so the view warns of six.
+	if len(rec.Missed()) != 6 {
 		t.Errorf("Missed(): %+v", rec.Missed())
 	}
 }

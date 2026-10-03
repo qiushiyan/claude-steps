@@ -15,7 +15,9 @@
 //     whole command does not run it;
 //   - `cd` moves the commands after it in the same scope, and a subshell, a
 //     pipeline member, a command substitution or a background job is a scope
-//     of its own.
+//     of its own;
+//   - a command that runs only on a branch decided at run time is marked
+//     Guarded.
 //
 // It does not expand globs, aliases or anything that needs the process
 // environment.
@@ -41,6 +43,11 @@ type Command struct {
 	// Dir is where the command runs: the directory Split was given, moved by
 	// the cd commands before it in its scope.
 	Dir string
+	// Guarded is set when the command may not have run although the text
+	// as a whole succeeded: it stands after ||, in the body of an if, case
+	// or loop, or in a background job. A command after && is not guarded: if
+	// it is skipped, the && list fails.
+	Guarded bool
 }
 
 // Argv returns the words after leading variable assignments and wrapper
@@ -102,6 +109,7 @@ type walker struct {
 	funcs map[string]*syntax.Stmt
 	vars  map[string]string
 	depth int
+	guard int // how many guarded branches enclose the statement walked
 }
 
 type scope struct {
@@ -131,6 +139,8 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 	}
 	if s.Background || s.Coprocess {
 		sc = sc.fork()
+		w.guard++
+		defer func() { w.guard-- }()
 	}
 	for _, r := range s.Redirs {
 		switch {
@@ -147,10 +157,14 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 	case *syntax.CallExpr:
 		w.call(c, sc, in)
 	case *syntax.BinaryCmd:
-		if c.Op == syntax.Pipe || c.Op == syntax.PipeAll {
+		switch c.Op {
+		case syntax.Pipe, syntax.PipeAll:
 			w.stmt(c.X, sc.fork(), in)
 			w.stmt(c.Y, sc.fork(), in)
-		} else {
+		case syntax.OrStmt:
+			w.stmt(c.X, sc, in)
+			w.guarded(func() { w.stmt(c.Y, sc, in) })
+		default:
 			w.stmt(c.X, sc, in)
 			w.stmt(c.Y, sc, in)
 		}
@@ -159,19 +173,26 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 	case *syntax.Block:
 		w.stmts(c.Stmts, sc, in)
 	case *syntax.IfClause:
-		for clause := c; clause != nil; clause = clause.Else {
-			w.stmts(clause.Cond, sc, in)
-			w.stmts(clause.Then, sc, in)
-		}
+		// The first condition always runs; every other part is a branch.
+		w.stmts(c.Cond, sc, in)
+		w.guarded(func() {
+			w.stmts(c.Then, sc, in)
+			for clause := c.Else; clause != nil; clause = clause.Else {
+				w.stmts(clause.Cond, sc, in)
+				w.stmts(clause.Then, sc, in)
+			}
+		})
 	case *syntax.WhileClause:
 		w.stmts(c.Cond, sc, in)
-		w.stmts(c.Do, sc, in)
+		w.guarded(func() { w.stmts(c.Do, sc, in) })
 	case *syntax.ForClause:
-		w.stmts(c.Do, sc, in)
+		w.guarded(func() { w.stmts(c.Do, sc, in) })
 	case *syntax.CaseClause:
-		for _, item := range c.Items {
-			w.stmts(item.Stmts, sc, in)
-		}
+		w.guarded(func() {
+			for _, item := range c.Items {
+				w.stmts(item.Stmts, sc, in)
+			}
+		})
 	case *syntax.TimeClause:
 		w.stmt(c.Stmt, sc, in)
 	case *syntax.CoprocClause:
@@ -193,6 +214,12 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 		}
 		w.assign(c.Args)
 	}
+}
+
+func (w *walker) guarded(walk func()) {
+	w.guard++
+	walk()
+	w.guard--
 }
 
 // funcBody returns a function's body and the statements chained after the
@@ -245,7 +272,7 @@ func (w *walker) call(c *syntax.CallExpr, sc *scope, in input) {
 	if name == "cd" && len(words) == first+2 {
 		sc.dir = join(sc.dir, words[first+1])
 	}
-	w.out = append(w.out, Command{Words: words, Stdin: in.body, HasStdin: in.set, Dir: sc.dir})
+	w.out = append(w.out, Command{Words: words, Stdin: in.body, HasStdin: in.set, Dir: sc.dir, Guarded: w.guard > 0})
 }
 
 // assign records variables whose values the text sets. The caller has

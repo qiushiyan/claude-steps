@@ -201,12 +201,21 @@ func (a *app) target(s session, token string) (string, *panes.Pane, error) {
 		}
 		return "", nil, fmt.Errorf("pane %s has no Claude session", token)
 	}
+	// The pane is only for display, so a missing tmux server is not an error.
+	live, _ := a.livePanes()
+	// A live session has no transcript before its first prompt, and the
+	// popup addresses it by its full id.
+	if record.IsSessionID(token) {
+		for _, p := range live {
+			if p.SessionID == token {
+				return token, &p, nil
+			}
+		}
+	}
 	id, err := s.loader.Resolve(token)
 	if err != nil {
 		return "", nil, err
 	}
-	// The pane is only for display, so a missing tmux server is not an error.
-	live, _ := a.livePanes()
 	for _, p := range live {
 		if p.SessionID == id {
 			return id, &p, nil

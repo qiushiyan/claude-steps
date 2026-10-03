@@ -61,7 +61,8 @@ Nothing persists between invocations except the notes.
   call that is the call.
 - **Label state:** the latest matching event that did not fail, and the
   commits made after it started. For a round that start is the dispatch: a
-  reviewer reads the code as it stood then. A prompt that only names a skill
+  reviewer reads the code as it stood then. The view prints the collect at
+  its own time. A prompt that only names a skill
   counts when nothing else matches, and never gets a commit count.
 - **Read status:** `ok`, `partial`, `unreadable`, `missing`. The last two
   never render as an empty timeline.
@@ -74,9 +75,10 @@ Nothing persists between invocations except the notes.
 
 ## Traps the code cannot show
 
-- **A slash command is a skill when the next user row is its expansion.** A
-  shared `promptId` is not enough: a `Skill` call later in the same turn
-  carries it too.
+- **A slash command is a skill when the next user row is its expansion,**
+  which opens with "Base directory for this skill:". A built-in such as
+  `/init` answers with a meta prompt of its own, and a `Skill` call later in
+  the same turn shares the command's `promptId`.
 - **Compaction summaries have no `origin` and name skills.** Rows without an
   origin are the user's only in a transcript where no row carries one.
 - **The Bash tool runs zsh here, which does not split an unquoted variable.**
@@ -84,15 +86,23 @@ Nothing persists between invocations except the notes.
   does run where it is called, with the call's here-document as its input.
 - **The parser returns `f() { … } && b` as one function body.** bash runs `b`
   once `f` is defined, so `funcBody` in `internal/shell` splits the chain.
-- **A commit's success comes from the whole call.** An error means no commit
-  unless git's own `[branch sha]` line is in the output. A failed commit
-  followed by `; true` counts: that is a stated limit.
+- **A commit's success comes from the whole call.** Most commits run with
+  `-q` and print nothing, so a call that returned no error is the evidence.
+  An error means no commit unless git's own `[branch sha]` line is in the
+  output, and a commit `internal/shell` marks guarded (after `||`, in an
+  `if`, `case` or loop, in the background) needs that line too. A failed
+  commit followed by `; true` counts: that is a stated limit.
 - **envoy's `ok` means the job returned a result.** Beside a review it would
   read as "passed", so it is not printed. `collect --status-only` is a probe,
   and a collect that prints no status keeps the word already read.
 - **A second trace is evidence, not a superset.** Claude Code itself leaves
   the odd created pull request without its link row, so `check` fails a fact
-  only past one miss in ten.
+  only past one miss in ten. The view shows such a pull request from the URL
+  gh printed and does not warn about it.
+- **envoy runs every dispatch in a directory of its own** (`review-r1`, then
+  `review-r1+2`). A collect by name means the session's latest dispatch, as
+  envoy reads it; a collect by path joins the latest dispatch under that
+  name too, since a background dispatch never shows its path.
 - **Transcript lines exceed a megabyte.** The reader uses no scanner with a
   fixed line limit.
 - **Claude Code sets copies aside under longer names.** The transcript is

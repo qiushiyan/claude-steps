@@ -88,6 +88,9 @@ type Signal struct {
 	Primary int    `json:"primary"`
 	Second  int    `json:"second"`
 	Missed  int    `json:"missed"`
+	// Filled counts the misses the reader shows anyway, from the second
+	// trace: the view has nothing to warn about for them.
+	Filled int `json:"filled,omitempty"`
 }
 
 // Record is one session as the views show it.
@@ -119,11 +122,13 @@ type Record struct {
 	Turns int `json:"-"`
 }
 
-// Missed returns the facts a second trace saw and the reader's rule did not.
+// Missed returns the facts the timeline may lack: a second trace saw them,
+// the reader's rule did not, and the reader could not show them anyway.
 func (r Record) Missed() []Signal {
 	var out []Signal
 	for _, s := range r.Signals {
-		if s.Missed > 0 {
+		if s.Missed > s.Filled {
+			s.Missed -= s.Filled
 			out = append(out, s)
 		}
 	}

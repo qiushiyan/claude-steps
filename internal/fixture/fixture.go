@@ -150,6 +150,13 @@ func (t *Transcript) BashError(cmd, result string) *Transcript {
 	return t
 }
 
+// BashBackground is a Bash call the tool ran in the background: its result
+// arrives at once and says only that the command started.
+func (t *Transcript) BashBackground(cmd string) *Transcript {
+	t.toolResult(t.toolUse("Bash", Row{"command": cmd, "run_in_background": true}), "Command running in background with ID: b1", false, nil)
+	return t
+}
+
 // BashPending is a Bash call with no result yet.
 func (t *Transcript) BashPending(cmd string) *Transcript {
 	t.toolUse("Bash", Row{"command": cmd})

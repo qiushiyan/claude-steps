@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -76,19 +77,10 @@ func (v View) describe(e record.Event) string {
 	case record.Mention:
 		return fmt.Sprintf("you: %q", e.Text)
 	case record.Round:
-		// envoy's "ok" says the job returned a result, not that a review
-		// passed, so it is not printed. Any other word is envoy's own.
-		switch {
-		case e.CollectedAt != nil && e.Outcome == "error":
-			return e.Name + "  collect returned an error"
-		case e.CollectedAt != nil && e.Outcome != "" && e.Outcome != "ok":
-			return e.Name + "  collected, envoy said " + e.Outcome
-		case e.CollectedAt != nil:
-			return e.Name + "  collected"
-		case e.Failed:
-			return e.Name + "  run returned an error"
+		if e.CollectedAt != nil {
+			return e.Name + "  " + collect(e, "")
 		}
-		return e.Name + "  dispatched"
+		return e.Name + "  " + dispatch(e)
 	case record.Commit:
 		head := "commit"
 		if e.Amend {
@@ -113,6 +105,52 @@ func (v View) describe(e record.Event) string {
 		return "note: " + oneLine(e.Text)
 	}
 	return string(e.Kind)
+}
+
+// collect says how a round's collect went, with when after the verb.
+// envoy's "ok" says the job returned a result, not that a review passed, so
+// it is not printed. Any other word is envoy's own.
+func collect(e record.Event, when string) string {
+	switch {
+	case e.Outcome == "error":
+		return join("collect returned an error", when)
+	case e.Outcome != "" && e.Outcome != "ok":
+		return join("collected", when) + ", envoy said " + e.Outcome
+	}
+	return join("collected", when)
+}
+
+func dispatch(e record.Event) string {
+	if e.Failed {
+		return "run returned an error"
+	}
+	return "dispatched"
+}
+
+// rows are the timeline's lines. A round this session dispatched and
+// collected is two lines, each at its own time.
+func (v View) rows(timeline []record.Event) []dated {
+	var out []dated
+	for _, e := range timeline {
+		if e.Kind == record.Round && e.Dispatched && e.CollectedAt != nil {
+			out = append(out, dated{e.At, "  " + e.Name + "  " + dispatch(e), e.Kind},
+				dated{*e.CollectedAt, "  " + v.describe(e), e.Kind})
+			continue
+		}
+		text := v.describe(e)
+		if e.Kind == record.Round {
+			text = "  " + text
+		}
+		out = append(out, dated{e.At, text, e.Kind})
+	}
+	slices.SortStableFunc(out, func(a, b dated) int { return a.at.Compare(b.at) })
+	return out
+}
+
+type dated struct {
+	at   time.Time
+	text string
+	kind record.Kind
 }
 
 func join(head, tail string) string {
@@ -220,18 +258,14 @@ func (v View) Show(w io.Writer, s Session) {
 		// lines is one line, dated at its last, with the count.
 		var rows [][]string
 		last, run := "", 0
-		for _, e := range timeline {
-			text := v.describe(e)
-			if e.Kind == record.Round {
-				text = "  " + text
-			}
-			if text == last && e.Kind != record.Note {
+		for _, e := range v.rows(timeline) {
+			if e.text == last && e.kind != record.Note {
 				run++
-				rows[len(rows)-1] = []string{v.ago(e.At), fmt.Sprintf("%s  (%d times)", text, run)}
+				rows[len(rows)-1] = []string{v.ago(e.at), fmt.Sprintf("%s  (%d times)", e.text, run)}
 				continue
 			}
-			last, run = text, 1
-			rows = append(rows, []string{v.ago(e.At), text})
+			last, run = e.text, 1
+			rows = append(rows, []string{v.ago(e.at), e.text})
 		}
 		table(w, "  ", rows)
 		if note := v.caveat(rec); note != "" {
@@ -308,7 +342,12 @@ func (v View) labelRow(l record.LabelState) []string {
 	if l.CommitsSince != nil {
 		since = plural(*l.CommitsSince, "commit") + " since"
 	}
-	return []string{l.Name, v.ago(l.Latest.At), since, clip(v.describe(*l.Latest), labelWidth)}
+	// The cell dates a round from its dispatch; the collect says its own time.
+	text := v.describe(*l.Latest)
+	if e := *l.Latest; e.Kind == record.Round && e.Dispatched && e.CollectedAt != nil {
+		text = e.Name + "  " + collect(e, v.ago(*e.CollectedAt))
+	}
+	return []string{l.Name, v.ago(l.Latest.At), since, clip(text, labelWidth)}
 }
 
 // Board prints one row per session. With ids, every line starts with the

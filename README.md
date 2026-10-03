@@ -15,15 +15,17 @@ The calendar walks days once   9ba78130   work:2.1
 ~/dev/app  feat/calendar
 PR #7145 opened here  acme/app   1 compaction, last 2 hours ago
 
-review    2 hours ago      1 commit since    review-r2 collected
+review    2 hours ago      1 commit since    review-r2 collected 1 hour ago
 verify    15 minutes ago   0 commits since   skill verify-local spikes
 docs      ·
 
   3 hours ago      /review  codex full review
-  3 hours ago        review-r1  collected
+  3 hours ago        review-r1  dispatched
   3 hours ago      commit  the calendar walks days once (review r1)
-  2 hours ago        review-r2  collected
+  3 hours ago        review-r1  collected
+  2 hours ago        review-r2  dispatched
   2 hours ago      compaction (manual)
+  1 hour ago         review-r2  collected
   1 hour ago       commit  docs: the stories on the local rig
   1 hour ago       PR #7145 opened here  acme/app
   15 minutes ago   skill verify-local  spikes
@@ -46,7 +48,8 @@ claude-steps import-notes <session id>          merge notes from another machine
 ```
 
 `<pane>` is a tmux pane id such as `%12`; `show` defaults to the pane it runs
-in. `<session>` is a session id or its first eight or more characters.
+in. `<session>` is a session id or its first eight or more characters; a
+live pane's full session id works before the session has a transcript.
 `claude-steps --help` has the rest.
 
 `board` finds Claude panes through the tmux pane option `@claude_ctx_sid`.
@@ -64,14 +67,17 @@ still works.
 - **`you: "…"`:** a prompt that named a labelled skill and ran nothing. Your
   words, not a run.
 - **`review-r1  dispatched` / `collected`:** an `envoy run` and its later
-  collect; `collected, envoy said partial` when envoy's status is not `ok`.
-- **`commit  subject`:** a `git commit` in a call that returned no error.
+  collect, each at its own time; `collected, envoy said partial` when envoy's
+  status is not `ok`.
+- **`commit  subject`:** a `git commit` in a call that returned no error. A
+  commit that may have been skipped (after `||`, inside an `if` or a loop,
+  in the background) counts only when git printed its `[branch sha]` line.
 - **`PR #12 opened here` / `linked`:** opened here only when `gh pr create`
   in this session returned its URL.
 - **`compaction (manual)`**, **`note: …`.**
 
-On the board a label's cell is the time of its latest event. `+2` counts the
-commits made since that event started; `read` or `named` in front says the
+On the board a label's cell is the time of its latest event; for a round
+that is the dispatch. `+2` counts the commits made since that event started; `read` or `named` in front says the
 latest event was only a file read or only a prompt; `·` says nothing matches.
 
 A transcript that cannot be read says so (`no transcript`,

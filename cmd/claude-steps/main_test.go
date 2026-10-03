@@ -168,6 +168,7 @@ func TestShow(t *testing.T) {
 		"PR #7145 opened here  acme/app",
 		"1 compaction, last 2 hours ago",
 		"3 hours ago      /review  codex full review",
+		"3 hours ago        review-r1  dispatched\n",
 		"3 hours ago        review-r1  collected\n",
 		"3 hours ago      commit  the calendar walks days once (review r1)",
 		"2 hours ago        review-r2  collected, envoy said partial",
@@ -178,7 +179,7 @@ func TestShow(t *testing.T) {
 	// The label lines: the latest review event is the second dispatch, and
 	// one commit was made since.
 	contains(t, out,
-		"review    2 hours ago      1 commit since    review-r2 collected, envoy said partial",
+		"review    2 hours ago      1 commit since    review-r2 collected 2 hours ago, envoy said partial",
 		"verify    15 minutes ago   0 commits since   skill pl-loopy-verify local spikes",
 		"prompts   12 minutes ago",
 	)
@@ -200,6 +201,25 @@ func TestShow(t *testing.T) {
 	// A session id works with no tmux at all.
 	w.panesErr = panes.ErrNoServer
 	contains(t, w.ok("show", "aaaaaaaa"), "The calendar walks days once   aaaaaaaa\n")
+}
+
+// A round collected long after its dispatch shows each at its own time;
+// the label still dates the round from the dispatch, the code the reviewer
+// read.
+func TestCollectIsShownWhenItHappened(t *testing.T) {
+	w := newWorld(t)
+	id := fixture.ID("ffffffff")
+	tr := fixture.New()
+	tr.Bash("envoy run review-r7 --with codex --prompt-file /tmp/r7.md", "Command running in background")
+	tr.At(w.now.Add(-16 * time.Minute)) // the result row is a minute after the call
+	tr.Bash("envoy collect review-r7", fmt.Sprintf(collected, "review-r7", "partial"))
+	tr.Write(t, w.projects, "-work-app", id)
+	out := w.ok("show", id)
+	contains(t, out,
+		"3 hours ago        review-r7  dispatched\n",
+		"15 minutes ago     review-r7  collected, envoy said partial\n",
+		"3 hours ago   0 commits since   review-r7 collected 15 minutes ago, envoy said partial\n",
+	)
 }
 
 // Obligation 17: --json carries timestamps and nothing relative.
@@ -319,9 +339,9 @@ func TestUnreadTranscriptsSayWhy(t *testing.T) {
 func TestViewSaysWhenTheReaderMayHaveMissedSomething(t *testing.T) {
 	w := newWorld(t)
 	id := fixture.ID("abab1212")
-	fixture.New().Bash("gh pr create --fill", "https://github.com/acme/app/pull/9").Write(t, w.projects, "p", id)
+	fixture.New().Bash(`sh -c "git commit -m x"`, "[main 1a2b3c4] x").Write(t, w.projects, "p", id)
 	w.panes = []panes.Pane{{ID: "%9", Where: "x:1.1", SessionID: id}}
-	want := "the reader may have missed 1 × pull request (claude-steps check)"
+	want := "the reader may have missed 1 × commit (claude-steps check)"
 	contains(t, w.ok("show", id), want)
 	contains(t, w.ok("board"), "["+want+"]")
 }
@@ -403,6 +423,15 @@ func TestNote(t *testing.T) {
 	if _, errb, code := w.run("note", worked, "lost"); code == 0 || !strings.Contains(errb, "the note was not saved") {
 		t.Errorf("a failed write: exit %d, %q", code, errb)
 	}
+}
+
+// A live session with no transcript yet, as before its first prompt, is
+// still a session: the popup addresses it by id, and its first note lands.
+func TestLiveSessionWithNoTranscriptTakesANote(t *testing.T) {
+	w := newWorld(t)
+	w.ok("note", gone, "noted before the first prompt")
+	contains(t, w.ok("show", gone), "no transcript", "noted before the first prompt")
+	contains(t, w.ok("show", "cccccccc"), "noted before the first prompt")
 }
 
 // Notes another machine kept for the session are merged from stdin.
