@@ -97,6 +97,7 @@ func newWorld(t *testing.T) *world {
 	tr.PRLink("acme/app", 7145)
 	tr.At(w.now.Add(-15 * time.Minute))
 	tr.SkillCall("pl-loopy-verify", "local spikes", "p", false)
+	tr.Read("/home/u/.claude/skills/prompt-engineering/SKILL.md", false)
 	tr.Write(t, w.projects, "-work-app", worked)
 
 	fixture.New().Prompt("have we run pl-loopy-verify yet? I think it is done").Write(t, w.projects, "-work-other", quiet)
@@ -179,7 +180,7 @@ func TestShow(t *testing.T) {
 	contains(t, out,
 		"review    2 hours ago      1 commit since    review-r2 collected, envoy said partial",
 		"verify    15 minutes ago   0 commits since   skill pl-loopy-verify local spikes",
-		"prompts   ·",
+		"prompts   12 minutes ago",
 	)
 
 	// With no argument, show reads the pane it runs in.
@@ -187,6 +188,15 @@ func TestShow(t *testing.T) {
 	if again := w.ok("show"); again != out {
 		t.Errorf("show with no argument differs from show %%1")
 	}
+	// The board's JSON holds every live session.
+	var board []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(w.ok("board", "--json")), &board); err != nil || len(board) != 5 || board[0].ID != worked {
+		t.Errorf("board --json: %v %+v", err, board)
+	}
+
 	// A session id works with no tmux at all.
 	w.panesErr = panes.ErrNoServer
 	contains(t, w.ok("show", "aaaaaaaa"), "The calendar walks days once   aaaaaaaa\n")
@@ -219,7 +229,7 @@ func TestShowJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if got.Pane != "%1" || got.ID != worked || got.Status != "ok" || len(got.Events) != 8 || !got.Events[0].At.Equal(fixture.Start) {
+	if got.Pane != "%1" || got.ID != worked || got.Status != "ok" || len(got.Events) != 9 || !got.Events[0].At.Equal(fixture.Start) {
 		t.Errorf("record: %+v", got)
 	}
 	if len(got.PullRequests) != 1 || !got.PullRequests[0].OpenedHere || len(got.Compactions) != 1 || got.Notes == nil {
@@ -243,7 +253,7 @@ func TestBoard(t *testing.T) {
 		t.Fatalf("want a header and five panes (the pane with a malformed id is not a session):\n%s", out)
 	}
 	contains(t, rows[0], "pane", "session", "review", "verify", "prompts", "PR", "compactions", "note")
-	contains(t, rows[1], "work:1.1", "The calendar walks days once", "2 hours ago +1", "15 minutes ago +0", "#7145")
+	contains(t, rows[1], "work:1.1", "The calendar walks days once", "2 hours ago +1", "15 minutes ago +0", "read 12 minutes ago", "#7145")
 	contains(t, rows[2], "work:1.2", "named 3 hours ago")
 	contains(t, rows[3], "work:2.1", "no transcript", "transcript deleted, the PR was merged")
 	contains(t, rows[4], "work:2.2", "transcript unreadable")
@@ -357,6 +367,11 @@ func TestNote(t *testing.T) {
 		t.Errorf("notes file:\n%s", data)
 	}
 
+	// The note text is opaque after "--", even when it reads like an option
+	// (review r1).
+	w.ok("note", worked, "--", "--help")
+	contains(t, w.ok("show", worked), "note: --help")
+
 	// A damaged line is reported and the notes around it are shown.
 	os.WriteFile(file, append(data, []byte("{broken\n")...), 0o644)
 	contains(t, w.ok("show", worked), "second note", "1 note line could not be read")
@@ -378,6 +393,31 @@ func TestNote(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Join(w.state, "notes"))
 	if len(entries) != 1 {
 		t.Errorf("a refused note left a file behind: %v", entries)
+	}
+
+	// A notes file that cannot be read is said, and a note that cannot be
+	// written fails.
+	os.Remove(file)
+	os.Mkdir(file, 0o755)
+	contains(t, w.ok("show", worked), "cannot read the notes for "+worked)
+	if _, errb, code := w.run("note", worked, "lost"); code == 0 || !strings.Contains(errb, "the note was not saved") {
+		t.Errorf("a failed write: exit %d, %q", code, errb)
+	}
+}
+
+// Notes another machine kept for the session are merged from stdin.
+func TestImportNotes(t *testing.T) {
+	w := newWorld(t)
+	w.ok("note", worked, "written here")
+	var out, errb bytes.Buffer
+	a := &app{stdin: strings.NewReader(`{"at":"2026-10-01T09:00:00Z","text":"from the laptop"}` + "\n"), stdout: &out, stderr: &errb,
+		now: func() time.Time { return w.now }, panes: func() ([]panes.Pane, error) { return w.panes, nil }, getenv: func(string) string { return "" }}
+	if code := a.run([]string{"import-notes", worked}); code != 0 || out.String() != "1 notes added\n" {
+		t.Fatalf("exit %d, %q, %q", code, out.String(), errb.String())
+	}
+	contains(t, w.ok("show", worked), "notes\n  3 hours ago   from the laptop\n  now           written here")
+	if _, _, code := w.run("import-notes", "aaaaaaaa"); code == 0 {
+		t.Error("import-notes takes a full session id")
 	}
 }
 
@@ -421,14 +461,20 @@ func TestWithoutTmuxOrASession(t *testing.T) {
 // Obligation 19.
 func TestCheck(t *testing.T) {
 	w := newWorld(t)
-	// The garbled transcript is drift by itself; take it away first.
+	// A line that does not decode is drift too: Claude Code writes whole
+	// lines, so one it cannot have written means the shape moved (review r1).
 	os.Remove(filepath.Join(w.projects, "-work-app", garbled+".jsonl"))
 	w.now = time.Now()
+	out, _, code := w.run("check")
+	if code == 0 || !strings.Contains(out, "1 read in part, 1 lines could not be decoded") {
+		t.Fatalf("a transcript with an undecodable line should fail check:\n%s", out)
+	}
+	os.Remove(filepath.Join(w.projects, "-work-app", torn+".jsonl"))
 	out, errb, code := w.run("check")
 	if code != 0 {
 		t.Fatalf("a consistent set should pass: %s\n%s", errb, out)
 	}
-	contains(t, out, "3 transcripts changed in the last 7 days", "1 read in part, 1 lines could not be decoded", "pull request", "no drift")
+	contains(t, out, "2 transcripts changed in the last 7 days", "pull request", "no drift")
 
 	drifted := fixture.ID("abab1212")
 	fixture.New().Bash("gh pr create --fill", "https://github.com/acme/app/pull/9").Write(t, w.projects, "p", drifted)
@@ -439,6 +485,21 @@ func TestCheck(t *testing.T) {
 	contains(t, out, "missed in abab1212", `the reader missed 1 of 2 for "pull request"`)
 	os.Remove(filepath.Join(w.projects, "p", drifted+".jsonl"))
 
+	// One miss in ten second traces is within tolerance; the reader is not
+	// asked to beat Claude Code's own rate of dropped link rows.
+	tolerated := fixture.New()
+	for n := 1; n <= 10; n++ {
+		tolerated.Bash("gh pr create --fill", fmt.Sprintf("https://github.com/acme/app/pull/%d", n))
+		if n > 1 {
+			tolerated.PRLink("acme/app", n)
+		}
+	}
+	tolerated.Write(t, w.projects, "p", drifted)
+	if out, _, code := w.run("check"); code != 0 {
+		t.Errorf("one miss in ten should pass:\n%s", out)
+	}
+	os.Remove(filepath.Join(w.projects, "p", drifted+".jsonl"))
+
 	// A transcript older than the window is not read.
 	old := time.Now().Add(-8 * 24 * time.Hour)
 	stale := fixture.New().Bash("gh pr create --fill", "https://github.com/acme/app/pull/9").Write(t, w.projects, "p", fixture.ID("cdcd3434"))
@@ -446,6 +507,16 @@ func TestCheck(t *testing.T) {
 	if out, _, code := w.run("check"); code != 0 {
 		t.Errorf("a transcript outside the window was read:\n%s", out)
 	}
+
+	// When no transcript holds a conversation row, the row types moved.
+	silentHome := t.TempDir()
+	silent := filepath.Join(silentHome, ".claude", "projects", "p")
+	fixture.WriteFile(t, filepath.Join(silent, fixture.ID("abcd0001")+".jsonl"), []byte(`{"type":"turn","text":"x"}`+"\n"))
+	t.Setenv("HOME", silentHome)
+	if out, _, code := w.run("check"); code == 0 || !strings.Contains(out, "no transcript holds a conversation row") {
+		t.Errorf("a week with no conversation rows should fail:\n%s", out)
+	}
+	t.Setenv("HOME", w.home)
 
 	fixture.WriteFile(t, filepath.Join(w.projects, "p", garbled+".jsonl"), []byte("not json\n"))
 	out, _, code = w.run("check")

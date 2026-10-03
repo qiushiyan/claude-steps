@@ -146,6 +146,29 @@ func TestFailedSkillCall(t *testing.T) {
 
 const collected = "job: /home/u/.local/state/envoy/jobs/app-1/%s\nstatus: %s\nduration: 6m\n\n--- result.md ---\nfindings"
 
+// A round this session only collected is dated at the collect call, like
+// every tool event: a commit made while the collect ran comes after it
+// (review r1).
+func TestCollectOnlyRoundIsDatedAtTheCall(t *testing.T) {
+	tr := fixture.New()
+	tr.Raw(fixture.Row{"type": "assistant", "timestamp": "2026-10-01T09:00:00.000Z", "message": fixture.Row{"content": []fixture.Row{
+		{"type": "tool_use", "id": "toolu-collect", "name": "Bash", "input": fixture.Row{"command": "envoy collect review-r4"}},
+		{"type": "tool_use", "id": "toolu-commit", "name": "Bash", "input": fixture.Row{"command": `git commit -m "while it ran"`}},
+	}}})
+	tr.Raw(fixture.Row{"type": "user", "timestamp": "2026-10-01T09:00:30.000Z", "message": fixture.Row{"content": []fixture.Row{
+		{"type": "tool_result", "tool_use_id": "toolu-commit", "content": ""}}}})
+	tr.Raw(fixture.Row{"type": "user", "timestamp": "2026-10-01T09:05:00.000Z", "message": fixture.Row{"content": []fixture.Row{
+		{"type": "tool_result", "tool_use_id": "toolu-collect", "content": fmt.Sprintf(collected, "review-r4", "ok")}}}})
+	rec := load(t, tr)
+	review := Summarise(rec.Events, labels)[0]
+	if review.Latest == nil || !review.Latest.At.Equal(fixture.Start) {
+		t.Fatalf("the round should be dated at the collect call: %+v", review.Latest)
+	}
+	if review.CommitsSince != nil && *review.CommitsSince != 0 {
+		t.Errorf("commits since: %d", *review.CommitsSince)
+	}
+}
+
 // Obligation 3.
 func TestRoundsAndTheCommitsSince(t *testing.T) {
 	tr := fixture.New()
@@ -227,6 +250,10 @@ func TestCommitIsACommandNotAWord(t *testing.T) {
 	tr.Bash(`git commit --amend --no-edit`, "")
 	tr.BashError(`git commit -m "made, then the test failed" && make test`, "[feat/thing 9f8e7d6] made, then the test failed\n 1 file changed\nExit code 2")
 	tr.Bash("commit() { git commit -q -F -; }\ncommit <<'EOF'\nfix: one\nEOF\ncommit <<'EOF'\nfix: two\nEOF", "")
+	tr.Bash(`git commit --message "long form"`, "")
+	tr.Bash(`git commit --message="with equals"`, "")
+	tr.Bash(`git commit -am "a cluster"`, "")
+	tr.Bash(`git commit -F - <<< "a here-string"`, "")
 	rec := load(t, tr)
 	want(t, rec,
 		"commit | docs: say what git commit does",
@@ -237,9 +264,94 @@ func TestCommitIsACommandNotAWord(t *testing.T) {
 		"commit | made, then the test failed",
 		"commit | fix: one",
 		"commit | fix: two",
+		"commit | long form",
+		"commit | with equals",
+		"commit | a cluster",
+		"commit | a here-string",
 	)
 	if s := signal(rec, "commit"); s.Missed != 0 {
 		t.Errorf("commit signal: %+v", s)
+	}
+}
+
+// A commit made somewhere other than the session's directory says where.
+// A cd inside a subshell does not move the commands after it (review r1).
+func TestDirectoryOfACommit(t *testing.T) {
+	tr := fixture.New()
+	tr.Bash(`cd /work/other && git commit -m "a"`, "")
+	tr.Bash(`(cd sub && make) ; git commit -m "b"`, "")
+	tr.Bash(`cd sub; git commit -m "c"`, "")
+	tr.Bash(`git -C ../lib commit -m "d"`, "")
+	tr.Bash(`cd /work/app && git commit -m "e"`, "")
+	tr.Bash(`x=$(cd /tmp && pwd); git commit -m "f"`, "")
+	want(t, load(t, tr),
+		"commit | a | /work/other",
+		"commit | b",
+		"commit | c | /work/app/sub",
+		"commit | d | /work/lib",
+		"commit | e",
+		"commit | f",
+	)
+}
+
+// Tool events are dated at the call, however late the result arrives.
+func TestToolEventsAreDatedAtTheCall(t *testing.T) {
+	tr := fixture.New()
+	tr.Raw(fixture.Row{"type": "assistant", "timestamp": "2026-10-01T09:00:00.000Z", "message": fixture.Row{"content": []fixture.Row{
+		{"type": "tool_use", "id": "toolu-c", "name": "Bash", "input": fixture.Row{"command": `git commit -m "slow hook"`}},
+		{"type": "tool_use", "id": "toolu-r", "name": "Read", "input": fixture.Row{"file_path": "/s/skills/prompt-engineering/SKILL.md"}},
+	}}})
+	tr.Raw(fixture.Row{"type": "user", "timestamp": "2026-10-01T09:30:00.000Z", "message": fixture.Row{"content": []fixture.Row{
+		{"type": "tool_result", "tool_use_id": "toolu-c", "content": ""}, {"type": "tool_result", "tool_use_id": "toolu-r", "content": "text"}}}})
+	rec := load(t, tr)
+	for _, e := range rec.Events {
+		if !e.At.Equal(fixture.Start) {
+			t.Errorf("%s dated %s, want the call's time", e.Kind, e.At)
+		}
+	}
+	if len(rec.Events) != 2 {
+		t.Errorf("events: %v", lines(rec))
+	}
+}
+
+// A subagent's tool calls in the main file are not the session's own.
+func TestSidechainToolCallsAreNotEvents(t *testing.T) {
+	tr := fixture.New()
+	tr.Raw(fixture.Row{"type": "assistant", "timestamp": "2026-10-01T09:00:00.000Z", "isSidechain": true, "message": fixture.Row{"content": []fixture.Row{
+		{"type": "tool_use", "id": "toolu-s", "name": "Bash", "input": fixture.Row{"command": `git commit -m "by a subagent"`}}}}})
+	tr.Raw(fixture.Row{"type": "user", "timestamp": "2026-10-01T09:01:00.000Z", "isSidechain": true, "message": fixture.Row{"content": []fixture.Row{
+		{"type": "tool_result", "tool_use_id": "toolu-s", "content": ""}}}})
+	tr.SkillCall("plugin:review", "", "p", false)
+	rec := load(t, tr)
+	want(t, rec, "skill | tool | plugin:review")
+	if st := Summarise(rec.Events, labels)[0]; st.Latest == nil || st.Latest.Name != "plugin:review" {
+		t.Errorf("a plugin-prefixed skill should match its bare name in a label: %+v", st.Latest)
+	}
+}
+
+// A run that returned an error is shown as such and is not the label's
+// latest event; a collect given a fan-out member's directory joins its round.
+func TestFailedRunAndMemberCollect(t *testing.T) {
+	tr := fixture.New()
+	tr.Bash("envoy run review-r1 --with codex --prompt-file a.md", "Command running in background")
+	tr.BashError("envoy run review-r2 --with nobody --prompt-file a.md", "envoy: unknown voice nobody")
+	tr.Bash("envoy collect '/home/u/.local/state/envoy/jobs/app-1/review-r1+2/codex'", "job: /jobs/review-r1+2/codex\nstatus: ok\n")
+	rec := load(t, tr)
+	want(t, rec, "round | review-r1 | ok | collected | dispatched", "round | review-r2 | dispatched | failed")
+	if st := Summarise(rec.Events, labels)[0]; st.Latest == nil || st.Latest.Name != "review-r1" {
+		t.Errorf("a failed run became the label's latest event: %+v", st.Latest)
+	}
+}
+
+// A skill file read after a run is the label's latest event: both are dated
+// activity, and the later one says what the session last did.
+func TestLaterReadOutranksAnEarlierRun(t *testing.T) {
+	tr := fixture.New()
+	tr.Slash("review", "", "/home/u/.claude/skills/review")
+	tr.Read("/home/u/.claude/skills/review/SKILL.md", false)
+	rec := load(t, tr)
+	if st := Summarise(rec.Events, labels)[0]; st.Latest == nil || st.Latest.Kind != Read {
+		t.Errorf("latest: %+v", st.Latest)
 	}
 }
 
@@ -364,6 +476,12 @@ func TestReadStatus(t *testing.T) {
 		{"a last line still being written", put("eeeeeeee", good+`{"type":"assistant","timest`), OK},
 		{"a conversation row with no time", put("ffffffff", good+`{"type":"user","message":{"content":"x"}}`+"\n"), Partial},
 		{"a field of another type", put("abababab", good+`{"type":"user","timestamp":"2026-10-01T09:00:00Z","origin":"human"}`+"\n"), Partial},
+		// Review r1: a row is recognised only once the fields the reader uses
+		// decode, a known tool's input of the wrong shape is an unread line,
+		// and a half-written first line is a session still being written.
+		{"only a row whose content has another type", put("cdcdcdcd", `{"type":"user","timestamp":"2026-10-01T09:00:00Z","message":{"content":5}}`+"\n"), Unreadable},
+		{"a Bash input of another shape", put("efefefef", good+`{"type":"assistant","timestamp":"2026-10-01T09:01:00Z","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":5}}]}}`+"\n"), Partial},
+		{"only a first line still being written", put("a1a1a1a1", `{"type":"user","timest`), OK},
 		{"no file", fixture.ID("99999999"), Missing},
 	}
 	for _, tc := range cases {
@@ -492,16 +610,19 @@ func TestSignalsCountWhatTheReaderMissed(t *testing.T) {
 		"message": fixture.Row{"content": "hello"}})
 	// A summary with no boundary row.
 	drifted.Raw(fixture.Row{"type": "user", "timestamp": "2026-10-01T09:12:00.000Z", "isCompactSummary": true, "message": fixture.Row{"content": "summary"}})
+	// A model's skill expansion naming a tool call the reader never saw.
+	drifted.Raw(fixture.Row{"type": "user", "timestamp": "2026-10-01T09:13:00.000Z", "isMeta": true, "sourceToolUseID": "toolu-unseen",
+		"message": fixture.Row{"content": "Base directory for this skill: /home/u/.claude/skills/review"}})
 	// A commit and a collect the command parser cannot see.
 	drifted.Bash(`bash -c 'git commit -m hidden'`, "[main 1a2b3c4] hidden")
 	drifted.Bash(`sh -c "envoy collect review-r1"`, fmt.Sprintf(collected, "review-r1", "ok"))
 	rec := load(t, drifted)
-	for _, fact := range []string{"pull request", "skill, typed", "human prompt", "compaction", "commit", "envoy round"} {
+	for _, fact := range []string{"pull request", "skill, typed", "skill, model call", "human prompt", "compaction", "commit", "envoy round"} {
 		if s := signal(rec, fact); s.Missed != 1 {
 			t.Errorf("%s: missed %d, want 1 (%+v)", fact, s.Missed, s)
 		}
 	}
-	if len(rec.Missed()) != 6 {
+	if len(rec.Missed()) != 7 {
 		t.Errorf("Missed(): %+v", rec.Missed())
 	}
 }

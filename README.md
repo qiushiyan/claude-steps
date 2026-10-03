@@ -42,6 +42,7 @@ claude-steps show [<pane>|<session>] [--json]   one session: its timeline and no
 claude-steps board [--json] [--ids]             every Claude pane in tmux, one row each
 claude-steps note <pane>|<session> <text…>      append a note to a session
 claude-steps check                              test the reader against recent transcripts
+claude-steps import-notes <session id>          merge notes from another machine, read on stdin
 ```
 
 `<pane>` is a tmux pane id such as `%12`; `show` defaults to the pane it runs

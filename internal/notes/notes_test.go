@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -77,6 +78,59 @@ func TestAppendAfterATornWrite(t *testing.T) {
 	notes, bad, _ := store.Load(id)
 	if bad != 1 || len(notes) != 2 || notes[1].Text != "after the damage" {
 		t.Errorf("got %d unreadable lines and notes %+v", bad, notes)
+	}
+}
+
+// A merge from another machine adds what it brings, keeps the notes written
+// here, twice adds nothing twice, and loses nothing written while it runs
+// (review r1: a merge that replaced the file lost a note appended meanwhile).
+func TestImport(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	if err := store.Append(id, at.Add(time.Hour), "written here"); err != nil {
+		t.Fatal(err)
+	}
+	other := `{"at":"2026-10-01T09:00:00Z","text":"from the laptop"}` + "\n" + `{"at":"2026-10-01T10:00:00Z","text":"written here"}` + "\n" + "not a note\n"
+	added, bad, err := store.Import(id, strings.NewReader(other))
+	if err != nil || added != 1 || bad != 1 {
+		t.Fatalf("added %d, bad %d, %v", added, bad, err)
+	}
+	if added, _, _ := store.Import(id, strings.NewReader(other)); added != 0 {
+		t.Errorf("a second import added %d", added)
+	}
+	// Two imports that raced can both append a note; it is read once.
+	f, _ := os.OpenFile(filepath.Join(store.Dir, id+".jsonl"), os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(`{"at":"2026-10-01T09:00:00Z","text":"from the laptop"}` + "\n")
+	f.Close()
+	if notes, _, _ := store.Load(id); len(notes) != 2 {
+		t.Errorf("a repeated line was read twice: %+v", notes)
+	}
+
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Go(func() {
+			if err := store.Append(id, at.Add(time.Duration(i+10)*time.Hour), fmt.Sprintf("meanwhile %d", i)); err != nil {
+				t.Error(err)
+			}
+		})
+		wg.Go(func() {
+			if _, _, err := store.Import(id, strings.NewReader(fmt.Sprintf(`{"at":"2026-10-03T%02d:00:00Z","text":"imported %d"}`+"\n", i%24, i))); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	notes, _, _ := store.Load(id)
+	texts := map[string]int{}
+	for _, n := range notes {
+		texts[n.Text]++
+	}
+	if len(notes) != 2+32+32 || texts["written here"] != 1 || texts["from the laptop"] != 1 {
+		t.Errorf("got %d notes: %v", len(notes), texts)
+	}
+	for i := 1; i < len(notes); i++ {
+		if notes[i].At.Before(notes[i-1].At) {
+			t.Fatalf("notes are not in time order: %v then %v", notes[i-1], notes[i])
+		}
 	}
 }
 

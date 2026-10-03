@@ -2,6 +2,7 @@ package record
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -173,6 +174,15 @@ func (l *Loader) Recent(since time.Time) []string {
 	}
 	slices.Sort(ids)
 	return ids
+}
+
+// ImportNotes merges notes for a session read from r, adding those the
+// session lacks.
+func (l *Loader) ImportNotes(id string, r io.Reader) (added, bad int, err error) {
+	if !IsSessionID(id) {
+		return 0, 0, fmt.Errorf("%q is not a session id", id)
+	}
+	return l.notes.Import(id, r)
 }
 
 // AddNote appends a note to a session.

@@ -23,6 +23,7 @@ const usage = `claude-steps — what has happened in a Claude Code session, read
   claude-steps board [--json] [--ids]             every Claude pane in tmux, one row each
   claude-steps note <pane>|<session> <text…>      append a note to a session
   claude-steps check                              test the reader against recent transcripts
+  claude-steps import-notes <session id>          merge notes from another machine, read on stdin
 
 <pane> is a tmux pane id such as %12; show defaults to the pane it runs in.
 <session> is a session id, or its first eight or more characters.
@@ -43,12 +44,16 @@ a new id and no notes, and its timeline starts with the history it copied.
 Not read: subagent transcripts, so a commit made by a subagent is not listed;
 commits made by git merge, rebase or cherry-pick, or through a script.
 
+import-notes takes the notes file of the same session from another machine
+and adds the notes this machine lacks; claude-tomini uses it.
+
 board --ids starts every line with the pane id, a tab, the session id and a
 tab, for a picker.
 --json prints RFC 3339 times and no relative ones.
 check counts each fact two ways over the last week's transcripts. It exits
-non-zero when a transcript is unreadable, or when a second trace saw more than
-one fact in ten that the reader's own rule missed.
+non-zero when a transcript is unreadable or has lines that do not decode, or
+when a second trace saw more than one fact in ten that the reader's own rule
+missed.
 
 Labels (the board's columns) and paths: ~/.config/claude-steps/config.toml
 Notes: $XDG_STATE_HOME/claude-steps/notes, default ~/.local/state
@@ -63,6 +68,7 @@ const (
 )
 
 type app struct {
+	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
 	now    func() time.Time
@@ -71,7 +77,7 @@ type app struct {
 }
 
 func main() {
-	a := &app{stdout: os.Stdout, stderr: os.Stderr, now: time.Now, panes: panes.List, getenv: os.Getenv}
+	a := &app{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, now: time.Now, panes: panes.List, getenv: os.Getenv}
 	os.Exit(a.run(os.Args[1:]))
 }
 
@@ -85,12 +91,6 @@ func (a *app) run(args []string) int {
 		fmt.Fprint(a.stdout, usage)
 		return 0
 	}
-	for _, arg := range rest {
-		if arg == "-h" || arg == "--help" {
-			fmt.Fprint(a.stdout, usage)
-			return 0
-		}
-	}
 
 	var run func(session, []string) error
 	switch cmd {
@@ -102,6 +102,8 @@ func (a *app) run(args []string) int {
 		run = a.note
 	case "check":
 		run = a.check
+	case "import-notes":
+		run = a.importNotes
 	default:
 		fmt.Fprintf(a.stderr, "claude-steps: unknown command %q\n\n%s", cmd, usage)
 		return 2
@@ -114,11 +116,18 @@ func (a *app) run(args []string) int {
 	home, _ := os.UserHomeDir()
 	s := session{cfg: cfg, loader: record.NewLoader(cfg), view: render.View{Now: a.now(), Home: home}}
 	if err := run(s, rest); err != nil {
+		if errors.Is(err, errHelp) {
+			fmt.Fprint(a.stdout, usage)
+			return 0
+		}
 		fmt.Fprintf(a.stderr, "claude-steps: %v\n", err)
 		return 1
 	}
 	return 0
 }
+
+// errHelp is returned by flags when the arguments ask for the usage.
+var errHelp = errors.New("help")
 
 // session is what one invocation works with.
 type session struct {
@@ -134,13 +143,17 @@ func (s session) load(id string, pane *panes.Pane) render.Session {
 }
 
 // flags splits arguments into the named switches that are present and the
-// rest, and refuses a switch the command does not have.
+// rest, and refuses a switch the command does not have. Everything after "--"
+// is an argument, so a note may read like an option.
 func flags(args []string, known ...string) (map[string]bool, []string, error) {
 	set := map[string]bool{}
 	var rest []string
 	for i, arg := range args {
 		if arg == "--" {
 			return set, append(rest, args[i+1:]...), nil
+		}
+		if arg == "-h" || arg == "--help" {
+			return nil, nil, errHelp
 		}
 		if !strings.HasPrefix(arg, "--") {
 			rest = append(rest, arg)
@@ -281,6 +294,27 @@ func (a *app) note(s session, args []string) error {
 	return nil
 }
 
+// importNotes merges notes another machine kept for a session. The
+// transcript need not be here yet: claude-tomini copies both.
+func (a *app) importNotes(s session, args []string) error {
+	_, rest, err := flags(args)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 1 || !record.IsSessionID(rest[0]) {
+		return errors.New("import-notes takes one full session id, and the notes on stdin")
+	}
+	added, bad, err := s.loader.ImportNotes(rest[0], a.stdin)
+	if err != nil {
+		return fmt.Errorf("the notes were not merged: %w", err)
+	}
+	fmt.Fprintf(a.stdout, "%d notes added\n", added)
+	if bad > 0 {
+		return fmt.Errorf("%d lines on stdin were not notes and were skipped", bad)
+	}
+	return nil
+}
+
 // check reads every transcript changed in the last week through the same
 // loader the views use, and reports each fact counted two ways.
 func (a *app) check(s session, args []string) error {
@@ -355,6 +389,11 @@ func (a *app) check(s session, args []string) error {
 	var drift []string
 	if len(unreadable) > 0 {
 		drift = append(drift, "a transcript is unreadable")
+	}
+	// Claude Code writes whole lines, so a line it cannot have written in the
+	// shape the reader knows means the shape moved.
+	if partial > 0 {
+		drift = append(drift, "lines do not decode")
 	}
 	// Every transcript without a conversation row means the row types moved.
 	if len(ids) > 0 && silent+len(unreadable) == len(ids) {

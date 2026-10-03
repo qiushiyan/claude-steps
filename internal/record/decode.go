@@ -178,7 +178,9 @@ func newDecoder(rec *Record, snippets []config.Snippet, mentions []mention) *dec
 	}
 }
 
-// read decodes the whole transcript. Lines run past a megabyte, so it reads
+// read decodes the whole transcript. A row counts as recognised only once
+// every field the reader takes from it has decoded, so a format change that
+// keeps the row types and moves their fields still reads as unread lines. Lines run past a megabyte, so it reads
 // with no fixed line limit.
 func (d *decoder) read(r io.Reader) error {
 	br := bufio.NewReaderSize(r, 1<<20)
@@ -186,10 +188,14 @@ func (d *decoder) read(r io.Reader) error {
 		line, err := br.ReadBytes('\n')
 		complete := err == nil
 		if line = bytes.TrimSpace(line); len(line) > 0 {
-			d.lines++
 			// A last line with no newline is still being written; one that
-			// does not decode yet is not a damaged line.
-			if !d.line(line) && complete {
+			// does not decode yet is neither a line read nor a damaged one.
+			switch {
+			case d.line(line):
+				d.lines++
+				d.recognised++
+			case complete:
+				d.lines++
 				d.rec.UnreadLines++
 			}
 		}
@@ -212,7 +218,6 @@ func (d *decoder) line(raw []byte) bool {
 	if err := json.Unmarshal(raw, &r); err != nil || r.Type == "" {
 		return false
 	}
-	d.recognised++
 	at, err := time.Parse(time.RFC3339Nano, r.Timestamp)
 	if err != nil {
 		at = d.lastAt
@@ -237,6 +242,10 @@ func (d *decoder) line(raw []byte) bool {
 		if err != nil {
 			return false
 		}
+		text, blocks, ok := content(r.Message.Content)
+		if !ok {
+			return false
+		}
 		d.rec.Turns++
 		// Subagent turns recorded in the main file are not the session's own.
 		if r.IsSidechain {
@@ -249,12 +258,8 @@ func (d *decoder) line(raw []byte) bool {
 		if r.GitBranch != "" {
 			d.rec.Branch = r.GitBranch
 		}
-		text, blocks, ok := content(r.Message.Content)
-		if !ok {
-			return false
-		}
 		if r.Type == "assistant" {
-			d.assistant(at, blocks)
+			return d.assistant(at, blocks)
 		} else {
 			d.user(at, r, text, blocks)
 		}
@@ -282,7 +287,10 @@ func content(raw json.RawMessage) (text string, blocks []block, ok bool) {
 	return strings.Join(parts, "\n"), blocks, true
 }
 
-func (d *decoder) assistant(at time.Time, blocks []block) {
+// assistant records the tool calls of a model turn. A call to a tool the
+// reader knows whose input does not decode makes the row unread.
+func (d *decoder) assistant(at time.Time, blocks []block) bool {
+	ok := true
 	for _, b := range blocks {
 		if b.Type != "tool_use" {
 			continue
@@ -294,6 +302,7 @@ func (d *decoder) assistant(at time.Time, blocks []block) {
 				Args  string `json:"args"`
 			}
 			if json.Unmarshal(b.Input, &in) != nil || in.Skill == "" {
+				ok = false
 				continue
 			}
 			d.skillCalls[b.ID] = d.add(Event{At: at, Kind: Skill, Via: "tool", Name: in.Skill, Args: clip(in.Args, argsMax)})
@@ -303,6 +312,7 @@ func (d *decoder) assistant(at time.Time, blocks []block) {
 				Command string `json:"command"`
 			}
 			if json.Unmarshal(b.Input, &in) != nil {
+				ok = false
 				continue
 			}
 			d.bash[b.ID] = d.bashCommand(at, in.Command)
@@ -313,6 +323,7 @@ func (d *decoder) assistant(at time.Time, blocks []block) {
 				FilePath string `json:"file_path"`
 			}
 			if json.Unmarshal(b.Input, &in) != nil {
+				ok = false
 				continue
 			}
 			if m := skillFile.FindStringSubmatch(in.FilePath); m != nil {
@@ -320,36 +331,31 @@ func (d *decoder) assistant(at time.Time, blocks []block) {
 			}
 		}
 	}
+	return ok
 }
 
-// resolve returns where a directory argument points, given where the call
-// already is. An empty next keeps the current place.
-func (d *decoder) resolve(current, next string) string {
+// within resolves git's -C argument against where the command runs.
+func within(dir, arg string) string {
 	switch {
-	case next == "":
-		return current
-	case path.IsAbs(next) || strings.HasPrefix(next, "~"):
-		return path.Clean(next)
-	case current == "" && d.cwd == "":
-		return next
-	case current == "":
-		return path.Join(d.cwd, next)
+	case arg == "":
+		return dir
+	case path.IsAbs(arg) || strings.HasPrefix(arg, "~") || dir == "":
+		return path.Clean(arg)
 	}
-	return path.Join(current, next)
+	return path.Join(dir, arg)
 }
 
 // bashCommand records what a Bash call ran. Round events are added now, at
 // the dispatch; commits wait for the result, which says whether they happened.
 func (d *decoder) bashCommand(at time.Time, command string) *bashCall {
 	call := &bashCall{at: at, mentionsCommit: strings.Contains(command, "commit"), mentionsEnvoy: envoyCall.MatchString(command)}
-	dir := "" // where the call has moved to with cd
-	for _, c := range shell.Split(command) {
+	// Text that does not parse yields no commands; a commit or round in it
+	// shows as a miss in the second traces below.
+	cmds, _ := shell.Split(command, d.cwd)
+	for _, c := range cmds {
 		argv := c.Argv()
-		if len(argv) == 2 && argv[0] == "cd" {
-			dir = d.resolve(dir, argv[1])
-		}
 		if commit, ok := commitOf(argv, c); ok {
-			if commit.dir = d.resolve(dir, commit.dir); commit.dir == d.cwd {
+			if commit.dir = within(c.Dir, commit.dir); commit.dir == d.cwd {
 				commit.dir = ""
 			}
 			call.commits = append(call.commits, commit)
@@ -541,7 +547,7 @@ func (d *decoder) result(at time.Time, b block) {
 		outcome = "error"
 	}
 	for _, job := range call.collects {
-		d.collect(job, at, outcome)
+		d.collect(job, call.at, at, outcome)
 	}
 	if jobLine.MatchString(text) && statusLine.MatchString(text) {
 		d.sig.round.Second++
@@ -561,20 +567,19 @@ func (d *decoder) result(at time.Time, b block) {
 // name. A later collect that printed a status replaces an earlier one; one
 // that printed none (`--result-only`, or output sent to a file) leaves the
 // status already read. A job this session never dispatched becomes a round of
-// its own, dated at the collect.
-func (d *decoder) collect(arg string, at time.Time, outcome string) {
+// its own, dated at the collect call.
+func (d *decoder) collect(arg string, called, returned time.Time, outcome string) {
 	job := d.jobName(arg)
 	idx, ok := d.rounds[job]
 	if !ok {
-		idx = d.add(Event{At: at, Kind: Round, Name: job})
+		idx = d.add(Event{At: called, Kind: Round, Name: job})
 		d.rounds[job] = idx
 	}
 	e := &d.rec.Events[idx]
 	if e.CollectedAt != nil && outcome == "" {
 		return
 	}
-	when := at
-	e.CollectedAt, e.Outcome = &when, outcome
+	e.CollectedAt, e.Outcome = &returned, outcome
 }
 
 // jobName reduces a collect's argument to a job name. envoy takes a name or
@@ -721,12 +726,12 @@ func commitOf(argv []string, c shell.Command) (commitCommand, bool) {
 		case strings.HasPrefix(a, "--message="):
 			take(strings.TrimPrefix(a, "--message="))
 		case a == "--file" || shortCluster(a, 'F'):
-			if v, ok := value(); ok && v == "-" && c.HasHeredoc {
-				take(c.Heredoc)
+			if v, ok := value(); ok && v == "-" && c.HasStdin {
+				take(c.Stdin)
 			}
 		case a == "--file=-":
-			if c.HasHeredoc {
-				take(c.Heredoc)
+			if c.HasStdin {
+				take(c.Stdin)
 			}
 		case strings.HasPrefix(a, "-m") && !strings.HasPrefix(a, "--"):
 			take(a[2:])

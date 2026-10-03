@@ -37,14 +37,18 @@ Nothing persists between invocations except the notes.
   Claude Code documents the format as internal, so a format change is
   repaired here and nowhere else. Rows are decoded as JSON structurally; no
   rule depends on spacing or key order.
-- **`internal/shell`:** what a Bash call runs, as simple commands. It keeps
-  quoted text, here-documents and commit messages from counting as commands.
+- **`internal/shell`:** what a Bash call runs, as simple commands, each with
+  its standard input and the directory it runs in. It parses with
+  `mvdan.cc/sh`, so quoting, here-documents and subshell scope follow the
+  shell's own rules, and nothing in `record` reasons about directories.
 - **`internal/record/load.go`:** where transcripts live, the read status, and
   turning what the user typed into a session id.
 - **`internal/record/labels.go`:** a label's latest event and the commits
   since. A label is a board column with no state.
-- **`internal/notes`:** one append-only file per session id, readable when
-  the transcript is gone.
+- **`internal/notes`:** one file per session id, readable when the transcript
+  is gone. It is only ever appended to; reading sorts by time and drops exact
+  repeats, so a merge from another machine (`claude-steps import-notes`)
+  appends what is missing and can never lose a note written meanwhile.
 - **`internal/render`:** pure functions from records to text and JSON, with
   the current time passed in.
 - **The popup:** `~/dotfiles/tmux/.config/tmux/scripts/tmux-steps.sh`. It
@@ -64,7 +68,9 @@ Nothing persists between invocations except the notes.
 - **Signals:** each fact is counted by the reader's rule and by a second
   trace that should exist whenever the first does. A second trace with no
   match is a miss. The view says so on the session, and `check` sums a week
-  of transcripts.
+  of transcripts. `check` also fails on any line that does not decode:
+  Claude Code writes whole lines, so one it could not have written in the
+  shape the reader knows means the shape moved.
 
 ## Traps the code cannot show
 
@@ -76,6 +82,8 @@ Nothing persists between invocations except the notes.
 - **The Bash tool runs zsh here, which does not split an unquoted variable.**
   `C="git commit -q"; $C -m x` runs nothing. A function defined in the call
   does run where it is called, with the call's here-document as its input.
+- **The parser returns `f() { … } && b` as one function body.** bash runs `b`
+  once `f` is defined, so `funcBody` in `internal/shell` splits the chain.
 - **A commit's success comes from the whole call.** An error means no commit
   unless git's own `[branch sha]` line is in the output. A failed commit
   followed by `; true` counts: that is a stated limit.
@@ -108,9 +116,10 @@ Nothing persists between invocations except the notes.
 
 - **`board --ids` rows:** `<pane id> TAB <session id> TAB <text>`, both ids
   empty on the header line. The popup parses them.
-- **The notes file:** `$XDG_STATE_HOME/claude-steps/notes/<id>.jsonl`, one
-  JSON object per line opening with its UTC time. `claude-tomini` merges two
-  such files by sorting their lines.
+- **The notes file and `import-notes`:**
+  `$XDG_STATE_HOME/claude-steps/notes/<id>.jsonl`, one JSON note per line.
+  `claude-tomini` sends a moved session's file to `claude-steps import-notes`
+  on the mini.
 - **The configuration keys:** the labels live in the dotfiles
   `claude-steps` package.
 - **`@claude_ctx_sid`:** set by the dotfiles context chip; without it the

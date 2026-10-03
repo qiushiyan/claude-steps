@@ -96,6 +96,18 @@ expand = "ok, go ahead"
 	}
 }
 
+func TestXDGConfigHome(t *testing.T) {
+	dir := home(t)
+	xdg := filepath.Join(dir, "xdg")
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	write(t, filepath.Join(xdg, "claude-steps", "config.toml"), "[[label]]\nname = \"from-xdg\"\n")
+	write(t, filepath.Join(dir, ".config", "claude-steps", "config.toml"), "[[label]]\nname = \"from-home\"\n")
+	cfg, err := Load()
+	if err != nil || len(cfg.Labels) != 1 || cfg.Labels[0].Name != "from-xdg" {
+		t.Errorf("got %+v, %v", cfg.Labels, err)
+	}
+}
+
 // A misspelt key would otherwise leave a column silently empty.
 func TestUnknownKeyIsRefused(t *testing.T) {
 	dir := home(t)
