@@ -38,9 +38,10 @@ Nothing persists between invocations except the notes.
   repaired here and nowhere else. Rows are decoded as JSON structurally; no
   rule depends on spacing or key order.
 - **`internal/shell`:** what a Bash call runs, as simple commands, each with
-  its standard input and the directory it runs in. It parses with
-  `mvdan.cc/sh`, so quoting, here-documents and subshell scope follow the
-  shell's own rules, and nothing in `record` reasons about directories.
+  its standard input, the directory it runs in, and whether it runs only on
+  a branch decided at run time (`Guarded`). It parses with `mvdan.cc/sh`, so
+  quoting, here-documents and subshell scope follow the shell's own rules,
+  and nothing in `record` reasons about shell syntax.
 - **`internal/record/load.go`:** where transcripts live, the read status, and
   turning what the user typed into a session id.
 - **`internal/record/labels.go`:** a label's latest event and the commits
@@ -61,15 +62,15 @@ Nothing persists between invocations except the notes.
   call that is the call.
 - **Label state:** the latest matching event that did not fail, and the
   commits made after it started. For a round that start is the dispatch: a
-  reviewer reads the code as it stood then. The view prints the collect at
-  its own time. A prompt that only names a skill
-  counts when nothing else matches, and never gets a commit count.
+  reviewer reads the code as it stood then; the view prints the collect at
+  its own time. A prompt that only names a skill counts when nothing else
+  matches, and never gets a commit count.
 - **Read status:** `ok`, `partial`, `unreadable`, `missing`. The last two
   never render as an empty timeline.
 - **Signals:** each fact is counted by the reader's rule and by a second
   trace that should exist whenever the first does. A second trace with no
-  match is a miss. The view says so on the session, and `check` sums a week
-  of transcripts. `check` also fails on any line that does not decode:
+  match is a miss. The view says so on the session when the fact may be
+  missing from it, and `check` sums a week of transcripts. `check` also fails on any line that does not decode:
   Claude Code writes whole lines, so one it could not have written in the
   shape the reader knows means the shape moved.
 

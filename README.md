@@ -77,8 +77,9 @@ still works.
 - **`compaction (manual)`**, **`note: …`.**
 
 On the board a label's cell is the time of its latest event; for a round
-that is the dispatch. `+2` counts the commits made since that event started; `read` or `named` in front says the
-latest event was only a file read or only a prompt; `·` says nothing matches.
+that is the dispatch. `+2` counts the commits made since that event started;
+`read` or `named` in front says the latest event was only a file read or only
+a prompt; `·` says nothing matches.
 
 A transcript that cannot be read says so (`no transcript`,
 `transcript unreadable`, `3 lines could not be read`) and is never drawn as an
