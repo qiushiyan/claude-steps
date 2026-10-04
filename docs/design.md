@@ -146,5 +146,6 @@ Nothing persists between invocations except the notes.
 
 ## The build's record
 
-`docs/specs/2026-10-02-session-view.md` holds what this page leaves out: the measured
-premises behind each rule, and the numbered obligations the tests cite.
+`docs/specs/2026-10-02-session-view.md` holds what this page leaves out:
+the measured premises behind each rule, and the numbered obligations the
+tests cite.
