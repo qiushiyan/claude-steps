@@ -36,4 +36,6 @@ The live docs are `README.md` (using it), `docs/design.md` (changing it) and
 this file. They follow `~/dotfiles/docs/documentation-standards.md`, with
 paths written from the repository root. `docs/specs/` holds build records:
 nothing live depends on one, and a shipped spec's decisions belong in
-`docs/design.md`.
+`docs/design.md`. `docs/EVIDENCE.md` logs each pass over real sessions, one
+dated entry a pass, in counts and short session ids only: no transcript's
+text goes into a public repository.

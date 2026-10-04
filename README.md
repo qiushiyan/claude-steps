@@ -12,7 +12,8 @@ and tells the model nothing.
 ```text
 $ claude-steps show
 The calendar walks days once   9ba78130   work:2.1
-~/dev/app  feat/calendar   PR #7145 opened here  acme/app   1 compaction, last 2 hours ago
+~/dev/app  feat/calendar   1 compaction, last 2 hours ago
+PR #7145 opened here  https://github.com/acme/app/pull/7145
 ────────────────────────────────────────────────────────────────────────
 review   2 hours ago      1 commit since    review-r2 collected 1 hour ago
 verify   15 minutes ago   0 commits since   skill verify-local spikes
@@ -25,12 +26,9 @@ steps
   verify   15m   skill verify-local  spikes
   note     1h    skip the docs pass
                  1 commit
-  review   1h    review-r2  collected
-  review   2h    review-r2  dispatched
-  review   3h    review-r1  collected
+  review   2h    review-r2
                  1 commit
-  review   3h    review-r1  dispatched
-  review   3h    /review  codex full review
+  review   3h    review-r1  /review  codex full review
 
 11 rows in the full history (show --all)
 
@@ -67,19 +65,28 @@ still works.
 A session view reads from the top, newest first:
 
 - **The header:** the title, the session id and its pane; then the directory,
-  the branch, the pull requests and the compactions. A transcript that could
-  not be read in full says so on the next line.
+  the branch and the compactions; then each pull request the session opened
+  or linked with its link, newest first. No `PR` there says the session has
+  none. A transcript that could not be read in full says so on the next
+  line.
 - **The labels:** one row for each, always: when its latest event happened,
-  the commits made since where the label counts them, and the event. `·`
-  says nothing in the session is under the label.
+  the commits made since where the label counts them, and the event. For a
+  round the time and the count run from its dispatch, and `collected …` in
+  the row is the collect's own time. `·` says nothing in the session is
+  under the label.
 - **`no collect seen`:** the rounds this session dispatched for which the
   transcript holds no collect, newest first, whether or not a label lists
   them. Such a round may be running, collected from another session, or
-  given up on; the transcript cannot tell which.
+  given up on; the transcript cannot tell which. A dispatch replaced under
+  the same name is not listed: the later dispatch is the round. `·` says
+  there is none.
 - **`notes`:** your latest notes. `show --all` lists every one.
 - **`steps`:** what ran under a label, and your notes at the time you wrote
-  them. The commits between two steps are one count line. The last line says
-  how many rows the full history holds.
+  them. A round is one step, at its dispatch, so the `review` lines count the
+  review rounds. The commits between two steps are one count line, and so are
+  those after the newest step and before the oldest; the commits above a round
+  were made after its dispatch. The last line says how many rows the full
+  history holds.
 - **`show --all`** prints that history in the steps' place: every line below,
   each with the labels it is under. With no label configured, `show` prints
   it too.
@@ -94,14 +101,30 @@ What a line says:
 - **`pasted <key>`:** a prompt holding the opening of a TabType snippet.
 - **`you: "…"`:** a prompt that named a labelled skill and ran nothing. Your
   words, not a run.
-- **`review-r1  dispatched` / `collected`:** an `envoy run` and its later
-  collect, each at its own time; `collected, envoy said partial` when envoy's
-  status is not `ok`.
+- **`review-r1`:** a round among the steps: an `envoy run` here and a
+  collect that returned a result. What differs is said after the name:
+  - **`no collect seen`:** the transcript holds no collect of it. A line
+    without these words was collected.
+  - **`envoy said partial`:** envoy's status for the job when it is not
+    `ok`. `ok` says a result came back, not that a review passed.
+  - **`collect returned an error`, `run returned an error`:** the call
+    failed.
+  - **`dispatched 2 times`:** the name was dispatched again before any
+    collect.
+  - **`no dispatch seen`:** the transcript holds only the collect.
+- **`review-r1  /review  args`:** the round, and the latest skill run before
+  it under its label, unless an earlier round carries that run. The two are
+  joined by their order alone. A skill run no round carries keeps a line of
+  its own.
+- **`review-r1  dispatched` / `collected`:** the same round in the full
+  history, where the dispatch, the collect and the skill run each have a line
+  at their own time.
 - **`commit  subject`:** a `git commit` in a call that returned no error. A
   commit that may have been skipped (after `||`, inside an `if` or a loop,
   in the background) counts only when git printed its `[branch sha]` line.
-- **`PR #12 opened here` / `linked`:** opened here only when `gh pr create`
-  in this session returned its URL.
+- **`PR #12 opened here` / `linked`:** a pull request Claude Code linked to
+  the session; opened here only when `gh pr create` in this session returned
+  its URL. The header gives its link, the full history its repository.
 - **`compaction (manual)`.**
 
 On the board a label's cell is the time of its latest event (`11m`, `2d`);
@@ -112,10 +135,12 @@ time of the newest round with no collect seen, and `×2` when there are two.
 
 A transcript that cannot be read says so (`no transcript`,
 `transcript unreadable`, `3 lines could not be read`) and is never drawn as an
-empty timeline. `the reader may have missed …` means Claude Code's transcript
-format may have moved: run `claude-steps check`. On the board `!` before a
-title marks such a session, and the words are in its note cell where there is
-room.
+empty timeline. `the reader may have missed …` says a fact may be absent
+from the view: Claude Code's transcript format may have moved, or an envoy
+call took its job from a variable or a file and printed no `job:` line.
+`claude-steps check` says whether the misses amount to drift. On the board
+`!` before a title marks such a session, and the words are in its note cell
+where there is room.
 
 Colour names and never grades. Each label's name has a hue; red marks an
 error the transcript reports and what the reader could not read; a count of
@@ -124,7 +149,9 @@ through a pipe with `CLICOLOR_FORCE=1`, and never with `NO_COLOR` set.
 
 With `COLUMNS` set, a view fits that width: an event's text is cut to one
 line, and on the board the title and the note give way while the label cells
-keep theirs. A note with no room is left to the session view.
+keep theirs. A note with no room is left to the session view. In a header
+that does not fit one line the pull requests start a line of their own, and
+a link is never cut.
 
 Not shown: commits made by a subagent, by `git merge`, `rebase` or
 `cherry-pick`, or inside a script.

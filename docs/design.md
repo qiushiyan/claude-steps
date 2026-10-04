@@ -74,24 +74,36 @@ Nothing persists between invocations except the notes.
   call that is the call.
 - **Label state:** the latest matching event that did not fail, and the
   commits made after it started. For a round that start is the dispatch: a
-  reviewer reads the code as it stood then; the view prints the collect at
-  its own time. A prompt that only names a skill counts when nothing else
+  reviewer reads the code as it stood then; the label's row says when the
+  collect happened. A prompt that only names a skill counts when nothing else
   matches, and never gets a commit count.
 - **Step:** an event under a label, or a note. A session view lists the
   steps newest first, with the commits between two as one count line; every
   other line is in the full history (`show --all`). The view is opened to ask
   whether a labelled step ran and what was committed since, and the steps
   are that answer in order.
+- **A round is one step.** Under a label that lists rounds, its lines count
+  the rounds run. The line is dated at the dispatch, like the label, so the
+  commits above it are the ones its reviewer did not read. It says what the
+  transcript holds only where that is not one dispatch and a collect that
+  returned a result. It takes the place of the latest skill run before it
+  under its label, unless an earlier round took that run, and carries the
+  run's words. The join is by order alone, so no line says a skill run
+  caused a round. The full history keeps the dispatch, the collect and the
+  skill run apart.
 - **Uncollected round:** a round this session dispatched for which the
   transcript holds no collect. It is listed apart from the labels, because a
   label state keeps only its latest event and a round no label lists has no
   row. The words are "no collect seen": the round may be running, collected
-  from another session, or given up on.
+  from another session, or given up on. A dispatch the session replaced
+  under the same name before any collect is not one (`Redispatched`): it is
+  counted on the later round's line.
 - **Read status:** `ok`, `partial`, `unreadable`, `missing`. The last two
   never render as an empty timeline.
 - **Signals:** each fact is counted by the reader's rule and by a second
   trace that should exist whenever the first does. A second trace with no
-  match is a miss. The view says so on the session when the fact may be
+  match is a miss, and so is an envoy call whose job neither its text nor
+  its output names. The view says so on the session when the fact may be
   missing from it, and `check` sums a week of transcripts. `check` also fails
   on any line that does not decode: Claude Code writes whole lines, so one it
   could not have written in the shape the reader knows means the shape moved.
@@ -125,7 +137,15 @@ Nothing persists between invocations except the notes.
 - **envoy runs every dispatch in a directory of its own** (`review-r1`, then
   `review-r1+2`). A collect by name means the session's latest dispatch, as
   envoy reads it; a collect by path joins the latest dispatch under that
-  name too, since a background dispatch never shows its path.
+  name too, since a background dispatch never shows its path. An earlier
+  dispatch under the name can therefore never show a collect, and sessions
+  do dispatch a name twice (`docs/EVIDENCE.md`).
+- **A collect's job is not always in the command text.** A loop collects
+  `"$j"`, and a path read from a file arrives as `"$(…)"`; `internal/shell`
+  keeps such a word as its source text. The reader names the job from the
+  `job:` lines envoy printed, and counts a miss when there are none.
+- **Claude Code wraps pasted text in `<pasted_content id="…">`.** The tag is
+  not the user's words, so a mention drops it.
 - **The terminal draws bold in a colour of the theme's own.** A hue under
   bold is lost, so no span is both; emphasis is weight alone.
 - **Yellow does not carry text on a light background** (2.16:1 on one of the
@@ -158,6 +178,13 @@ Nothing persists between invocations except the notes.
   behind the label's latest event, and a round no label lists has no cell.
 - **A short timeline that keeps every event but the commits:** the view is
   opened for the labelled steps, and the whole history is one flag away.
+- **A pull request among the steps:** what is asked of one is whether the
+  work has it yet, and its link. The header answers both, from the link row
+  Claude Code writes for the session, and a header with no `PR` says there
+  is none.
+- **A step each for a round's dispatch, its collect and the skill run before
+  it:** the lines under a label then do not count its rounds, and the steps
+  run half as long again for the same facts (`docs/EVIDENCE.md`).
 - **A block of history under each label, or a lane per label:** the first
   loses the order across labels, the second has no room for an event's text.
 - **A row drawn faint when no label has an event:** such a session can hold
@@ -203,4 +230,6 @@ Nothing persists between invocations except the notes.
 
 `docs/specs/2026-10-02-session-view.md` holds what this page leaves out:
 the measured premises behind each rule, and the numbered obligations the
-tests cite.
+tests cite. `docs/EVIDENCE.md` holds what the views showed for real
+sessions: each pass's counts, what it changed, and what the next should
+compare.
