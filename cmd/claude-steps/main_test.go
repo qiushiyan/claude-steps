@@ -317,6 +317,72 @@ func TestANameDispatchedAgainIsOneRound(t *testing.T) {
 	}
 }
 
+// A run that returned an error keeps a line of its own and takes no count
+// from the dispatches around it. When envoy's job line shows the job was
+// created, a collect by the name reads that round, the step says both, and
+// the label counts it: a result came back. With no job line the run ran
+// nothing, and the collect is a round dispatched somewhere else.
+func TestARunThatReturnedAnError(t *testing.T) {
+	const run = "envoy run review-r1 --with codex --prompt-file /tmp/p.md"
+	w := newWorld(t)
+	id := fixture.ID("a0a0a0a0")
+	show := func(tr *fixture.Transcript, args ...string) string {
+		tr.Write(t, w.projects, "p", id)
+		return w.ok(append([]string{"show", id}, args...)...)
+	}
+
+	tr := fixture.New()
+	tr.Bash(run, "Command running in background")
+	tr.BashError(run, "envoy: unknown voice")
+	tr.Bash(run, "Command running in background")
+	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "ok"))
+	contains(t, show(tr), "\nsteps\n  review   3h   review-r1  dispatched 2 times\n  review   3h   review-r1  run returned an error\n\n")
+
+	tr = fixture.New()
+	tr.BashError(run, "job: /jobs/app-1/review-r1\nprovider: codex\nstatus: timeout — the turn hit its cap\n")
+	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "timeout"))
+	contains(t, show(tr),
+		"review    3 hours ago   0 commits since   review-r1 collected 3 hours ago, envoy said timeout\n",
+		"\nsteps\n  review   3h   review-r1  run returned an error, collected, envoy said timeout\n\n",
+	)
+	contains(t, show(tr, "--all"), "  review   3h   review-r1  collected, envoy said timeout\n  review   3h   review-r1  run returned an error\n")
+	w.env = map[string]string{"CLICOLOR_FORCE": "1"}
+	contains(t, show(tr), "\x1b[31mreview-r1  run returned an error, collected, envoy said timeout\x1b[0m\n")
+	w.env = nil
+
+	tr = fixture.New()
+	tr.BashError(run, "envoy: unknown voice")
+	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "partial"))
+	contains(t, show(tr),
+		"review    3 hours ago   0 commits since   review-r1 collected, envoy said partial\n",
+		"\nsteps\n  review   3h   review-r1  envoy said partial, no dispatch seen\n  review   3h   review-r1  run returned an error\n\n",
+	)
+}
+
+// A round under two labels carries the latest skill run before it under
+// either, not the run of the label the configuration lists first.
+func TestARoundUnderTwoLabelsCarriesTheLatestRun(t *testing.T) {
+	w := newWorld(t)
+	fixture.WriteFile(t, filepath.Join(w.home, ".config", "claude-steps", "config.toml"), []byte(`
+[[label]]
+name = "review"
+skills = ["review"]
+jobs = ["review-"]
+
+[[label]]
+name = "docs"
+skills = ["update-docs"]
+jobs = ["review-"]
+`))
+	id := fixture.ID("e0e0e0e0")
+	tr := fixture.New().Slash("review", "older", "/home/u/.claude/skills/review")
+	tr.Slash("update-docs", "newer", "/home/u/.claude/skills/update-docs")
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/p.md", "Command running in background")
+	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "ok"))
+	tr.Write(t, w.projects, "p", id)
+	contains(t, w.ok("show", id), "\nsteps\n  review docs   3h   review-r1  /update-docs  newer\n  review        3h   /review  older\n\n")
+}
+
 // Obligation 17: --json carries timestamps and nothing relative.
 func TestShowJSON(t *testing.T) {
 	w := newWorld(t)
@@ -969,6 +1035,20 @@ func TestCheck(t *testing.T) {
 	out, _, code = w.run("check")
 	if code == 0 || !strings.Contains(out, "unreadable: "+garbled) {
 		t.Errorf("an unreadable transcript should fail check:\n%s", out)
+	}
+}
+
+// A store that cannot be read is said: the session view names what it could
+// not read, and check fails rather than report no drift over nothing.
+func TestAStoreThatCannotBeReadIsSaid(t *testing.T) {
+	w := newWorld(t)
+	blocked := fixture.WriteFile(t, filepath.Join(w.home, "projects-is-a-file"), []byte("not a directory"))
+	fixture.WriteFile(t, filepath.Join(w.home, ".config", "claude-steps", "config.toml"), []byte(fmt.Sprintf("projects_dir = %q\n%s", blocked, configFile)))
+	contains(t, w.ok("show", "%1"), "transcript unreadable  ~/projects-is-a-file\n")
+	contains(t, w.ok("board"), "work:1.1", "transcript unreadable")
+	out, errb, code := w.run("check")
+	if code == 0 || strings.Contains(out, "no drift") || !strings.Contains(errb, "nothing was checked") {
+		t.Errorf("check over a store it cannot list: exit %d, %q, %q", code, out, errb)
 	}
 }
 

@@ -110,16 +110,24 @@ func (v View) describe(e record.Event) string {
 }
 
 // collect says how a round's collect went, with when after the verb.
-// envoy's "ok" says the job returned a result, not that a review passed, so
-// it is not printed. Any other word is envoy's own.
 func collect(e record.Event, when string) string {
 	switch {
-	case e.Outcome == "error":
+	case e.CollectFailed:
 		return join("collect returned an error", when)
-	case e.Outcome != "" && e.Outcome != "ok":
-		return join("collected", when) + ", envoy said " + e.Outcome
+	case said(e) != "":
+		return join("collected", when) + ", " + said(e)
 	}
 	return join("collected", when)
+}
+
+// said is envoy's word for a collected job, when it has one worth printing.
+// Its "ok" says the job returned a result, not that a review passed, so it
+// is not printed. Any other word is envoy's own.
+func said(e record.Event) string {
+	if e.Outcome == "" || e.Outcome == "ok" {
+		return ""
+	}
+	return "envoy said " + e.Outcome
 }
 
 func dispatch(e record.Event) string {
@@ -152,62 +160,71 @@ func (v View) lineOf(e record.Event) line {
 
 // round is a round's one line among the steps: its name, and what the
 // transcript holds of it only where that is something other than one dispatch
-// and a collect that returned a result.
-func round(e record.Event, dispatches int) (string, style) {
-	var said []string
-	if dispatches > 1 {
-		said = append(said, fmt.Sprintf("dispatched %d times", dispatches))
+// and a collect that returned a result. A run that returned an error is such
+// a case, so its collect is said in full.
+func round(e record.Event) (string, style) {
+	var words []string
+	add := func(w string) {
+		if w != "" {
+			words = append(words, w)
+		}
+	}
+	if e.Dispatches > 1 {
+		add(fmt.Sprintf("dispatched %d times", e.Dispatches))
 	}
 	st := plain
 	switch {
 	case e.Failed:
-		said, st = append(said, dispatch(e)), problem
+		add(dispatch(e))
+		if e.CollectedAt != nil {
+			add(collect(e, ""))
+		}
+		st = problem
 	case e.CollectedAt == nil:
-		said = append(said, "no collect seen")
+		add("no collect seen")
+	case e.CollectFailed:
+		add(collect(e, ""))
+		st = problem
 	default:
-		switch {
-		case e.Outcome == "error":
-			said, st = append(said, "collect returned an error"), problem
-		case e.Outcome != "" && e.Outcome != "ok":
-			said = append(said, "envoy said "+e.Outcome)
-		}
-		if !e.Dispatched {
-			said = append(said, "no dispatch seen")
-		}
+		add(said(e))
 	}
-	return join(e.Name, strings.Join(said, ", ")), st
+	if !e.Dispatched {
+		add("no dispatch seen")
+	}
+	return join(e.Name, strings.Join(words, ", ")), st
 }
 
 // outline is the timeline the steps are picked from, oldest first. Under a
 // label that lists rounds a step is a round, so a round is one line here,
-// dated at its dispatch. It carries the latest skill run before it under its
-// label, whose own line it replaces, and stands for the dispatches the
-// session replaced under its name. The two are joined by order alone. The
-// full history keeps each of those at its own time.
+// dated at its dispatch. It carries the latest skill run before it under any
+// of its labels, whose own line it replaces. The two are joined by order
+// alone. A dispatch the session replaced has no line: the round that
+// replaced it says how many it stands for. The full history keeps each of
+// those at its own time.
 func (v View) outline(rec record.Record) []line {
 	var out []line
 	asked := map[string]int{} // label → the line of its latest skill run, until a round takes it
 	taken := map[int]bool{}   // lines a round replaced
-	again := map[string]int{} // round name → its dispatches a later one replaced
 	for _, e := range rec.Timeline() {
 		l := v.lineOf(e)
 		switch {
-		case e.Kind == record.Round && e.Redispatched && !e.Failed:
-			again[e.Name]++
+		case e.Kind == record.Round && e.Redispatched:
 			continue
 		case e.Kind == record.Round:
-			l.text, l.style = round(e, again[e.Name]+1)
-			delete(again, e.Name)
+			l.text, l.style = round(e)
 			if !e.Dispatched || e.Failed {
 				break
 			}
+			latest := -1
 			for _, name := range l.labels {
 				if i, ok := asked[name]; ok {
-					l.text = join(l.text, out[i].text)
-					taken[i] = true
-					maps.DeleteFunc(asked, func(_ string, at int) bool { return at == i })
-					break
+					latest = max(latest, i)
 				}
+			}
+			if latest >= 0 {
+				l.text = join(l.text, out[latest].text)
+				taken[latest] = true
+				maps.DeleteFunc(asked, func(_ string, at int) bool { return at == latest })
 			}
 		case e.Kind == record.Skill && !e.Failed:
 			for _, name := range l.labels {
@@ -234,7 +251,7 @@ func (v View) lines(rec record.Record) []line {
 		if e.Kind == record.Round && e.CollectedAt != nil {
 			got := l
 			got.at, got.style = *e.CollectedAt, plain
-			if e.Outcome == "error" {
+			if e.CollectFailed {
 				got.style = problem
 			}
 			if !e.Dispatched {
@@ -585,7 +602,7 @@ func (v View) labelRow(l record.LabelState) trow {
 		if e.Dispatched {
 			row.text = e.Name + "  " + collect(e, v.ago(*e.CollectedAt))
 		}
-		if e.Outcome == "error" {
+		if e.CollectFailed {
 			row.style = problem
 		}
 	}

@@ -1,8 +1,11 @@
 package record
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,8 +56,17 @@ func (l *Loader) Load(id string) Record {
 		rec.UnreadNotes = bad
 	}
 
-	path, ok := l.find(id)
-	if !ok {
+	path, err := l.find(id)
+	if err != nil {
+		// A directory that may hold the transcript could not be read, so the
+		// session is not known to have none.
+		rec.Status, rec.Path = Unreadable, l.projects
+		if at := new(fs.PathError); errors.As(err, &at) {
+			rec.Path = at.Path
+		}
+		return rec
+	}
+	if path == "" {
 		return rec
 	}
 	rec.Path = path
@@ -82,38 +94,82 @@ func (l *Loader) Load(id string) Record {
 	return rec
 }
 
-// find locates <id>.jsonl in any project directory. A session keeps its file
-// name when /cd moves it to another project. Copies Claude Code sets aside
-// under longer names never match, because the name is compared whole.
-func (l *Loader) find(id string) (string, bool) {
-	dirs, err := os.ReadDir(l.projects)
+// find locates <id>.jsonl in any project directory, and returns "" when no
+// directory holds it. A session keeps its file name when /cd moves it to
+// another project. Copies Claude Code sets aside under longer names never
+// match, because the name is compared whole. A directory that could not be
+// looked in is an error when the transcript was found in no other: what
+// cannot be read is not known to be missing.
+func (l *Loader) find(id string) (string, error) {
+	dirs, err := l.projectDirs()
 	if err != nil {
-		return "", false
+		return "", err
 	}
 	var best string
 	var newest time.Time
+	var unread error
 	for _, dir := range dirs {
-		path := filepath.Join(l.projects, dir.Name(), id+".jsonl")
+		path := filepath.Join(dir, id+".jsonl")
 		info, err := os.Stat(path)
-		if err != nil || info.IsDir() {
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		case err != nil:
+			unread = err
+			continue
+		case info.IsDir():
 			continue
 		}
 		if best == "" || info.ModTime().After(newest) {
 			best, newest = path, info.ModTime()
 		}
 	}
-	return best, best != ""
+	if best == "" {
+		return "", unread
+	}
+	return best, nil
 }
 
-// transcripts calls fn for every transcript file under the projects directory.
-func (l *Loader) transcripts(fn func(id string, modified time.Time)) {
-	dirs, err := os.ReadDir(l.projects)
-	if err != nil {
-		return
+// projectDirs lists the directories under the projects directory. A projects
+// directory that does not exist holds none; one that cannot be listed is an
+// error.
+func (l *Loader) projectDirs() ([]string, error) {
+	entries, err := os.ReadDir(l.projects)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	for _, e := range entries {
+		path := filepath.Join(l.projects, e.Name())
+		// A file beside the project directories is not one of them.
+		if e.Type()&fs.ModeSymlink != 0 {
+			if info, err := os.Stat(path); err == nil && !info.IsDir() {
+				continue
+			}
+		} else if !e.IsDir() {
+			continue
+		}
+		dirs = append(dirs, path)
+	}
+	return dirs, nil
+}
+
+// transcripts calls fn for every transcript file under the projects
+// directory. It returns the error of a directory it could not list, after
+// reading the others.
+func (l *Loader) transcripts(fn func(id string, modified time.Time)) error {
+	dirs, err := l.projectDirs()
+	if err != nil {
+		return err
+	}
+	var unread error
 	for _, dir := range dirs {
-		files, err := os.ReadDir(filepath.Join(l.projects, dir.Name()))
+		files, err := os.ReadDir(dir)
 		if err != nil {
+			unread = err
 			continue
 		}
 		for _, f := range files {
@@ -126,6 +182,7 @@ func (l *Loader) transcripts(fn func(id string, modified time.Time)) {
 			}
 		}
 	}
+	return unread
 }
 
 // Resolve turns what the user typed into a full session id: a full id, or a
@@ -136,7 +193,7 @@ func (l *Loader) Resolve(token string) (string, error) {
 		return "", fmt.Errorf("%q is not a session id: give a full id or at least its first eight characters", token)
 	}
 	found := map[string]bool{}
-	l.transcripts(func(id string, _ time.Time) {
+	unread := l.transcripts(func(id string, _ time.Time) {
 		if strings.HasPrefix(id, token) {
 			found[id] = true
 		}
@@ -146,13 +203,12 @@ func (l *Loader) Resolve(token string) (string, error) {
 			found[id] = true
 		}
 	}
-	ids := make([]string, 0, len(found))
-	for id := range found {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
+	ids := slices.Sorted(maps.Keys(found))
 	switch len(ids) {
 	case 0:
+		if unread != nil {
+			return "", fmt.Errorf("cannot look for %s: %w", token, unread)
+		}
 		return "", fmt.Errorf("no session matches %s: no transcript and no notes on this machine", token)
 	case 1:
 		return ids[0], nil
@@ -160,20 +216,20 @@ func (l *Loader) Resolve(token string) (string, error) {
 	return "", fmt.Errorf("%s matches %d sessions, give more of the id:\n  %s", token, len(ids), strings.Join(ids, "\n  "))
 }
 
-// Recent lists the sessions whose transcript changed at or after since.
-func (l *Loader) Recent(since time.Time) []string {
+// Recent lists the sessions whose transcript changed at or after since. A
+// directory that could not be listed is an error: the list would be short
+// with nothing to say so.
+func (l *Loader) Recent(since time.Time) ([]string, error) {
 	seen := map[string]bool{}
-	l.transcripts(func(id string, modified time.Time) {
+	err := l.transcripts(func(id string, modified time.Time) {
 		if !modified.Before(since) {
 			seen[id] = true
 		}
 	})
-	ids := make([]string, 0, len(seen))
-	for id := range seen {
-		ids = append(ids, id)
+	if err != nil {
+		return nil, err
 	}
-	slices.Sort(ids)
-	return ids
+	return slices.Sorted(maps.Keys(seen)), nil
 }
 
 // ImportNotes merges notes for a session read from r, adding those the

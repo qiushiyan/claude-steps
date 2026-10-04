@@ -22,10 +22,11 @@ type LabelState struct {
 // Summarise reduces a session's events to one state per label.
 //
 // A label's latest event is the latest skill, snippet, round or skill-file
-// read that matches it and did not fail. When there is none it is the latest
-// prompt that named one of its skills. Commits are counted from that event's
-// time, which for a round is its dispatch: a commit made while a review runs
-// is not covered by it.
+// read that matches it and did not fail. A round whose run returned an error
+// and that was collected all the same did not fail: a result came back. When
+// there is none it is the latest prompt that named one of its skills. Commits
+// are counted from that event's time, which for a round is its dispatch: a
+// commit made while a review runs is not covered by it.
 func Summarise(events []Event, labels []config.Label) []LabelState {
 	out := make([]LabelState, 0, len(labels))
 	for _, l := range labels {
@@ -36,7 +37,7 @@ func Summarise(events []Event, labels []config.Label) []LabelState {
 			case !belongs(l, e):
 			case e.Kind == Mention:
 				named = e
-			case !e.Failed:
+			case !e.Failed || e.CollectedAt != nil:
 				ran = e
 			}
 		}

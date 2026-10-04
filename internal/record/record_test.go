@@ -51,30 +51,20 @@ func lines(rec Record) []string {
 		if e.Kind == PR {
 			line += fmt.Sprintf(" | #%d", e.Number)
 		}
-		for flag, on := range map[string]bool{"failed": e.Failed, "amend": e.Amend, "dispatched": e.Dispatched, "collected": e.CollectedAt != nil, "opened-here": e.OpenedHere} {
+		if e.Dispatches > 0 {
+			line += fmt.Sprintf(" | ×%d", e.Dispatches)
+		}
+		var flags []string
+		for flag, on := range map[string]bool{"failed": e.Failed, "amend": e.Amend, "dispatched": e.Dispatched, "replaced": e.Redispatched,
+			"collected": e.CollectedAt != nil, "collect-failed": e.CollectFailed, "opened-here": e.OpenedHere} {
 			if on {
-				line += " | " + flag
+				flags = append(flags, flag)
 			}
 		}
-		out = append(out, canonical(line))
+		sort.Strings(flags)
+		out = append(out, strings.Join(append([]string{line}, flags...), " | "))
 	}
 	return out
-}
-
-// canonical orders the flags of a line, which come from a map.
-func canonical(line string) string {
-	parts := strings.Split(line, " | ")
-	flags := map[string]bool{"failed": true, "amend": true, "dispatched": true, "collected": true, "opened-here": true}
-	var head, tail []string
-	for _, p := range parts {
-		if flags[p] {
-			tail = append(tail, p)
-		} else {
-			head = append(head, p)
-		}
-	}
-	sort.Strings(tail)
-	return strings.Join(append(head, tail...), " | ")
 }
 
 func want(t *testing.T, rec Record, expected ...string) {
@@ -232,7 +222,7 @@ func TestCollectKeepsEnvoysWord(t *testing.T) {
 		"round | consult-r1 | partial | collected | dispatched",
 		"round | consult-r1 | collected | dispatched",
 		"round | review-r9 | no-result | collected",
-		"round | review-r3 | error | collected",
+		"round | review-r3 | collect-failed | collected",
 		"round | verify-r1 | dispatched",
 	)
 	if s := signal(rec, "envoy round"); s.Missed != 0 {
@@ -686,6 +676,92 @@ func TestCollectNamedByWhatEnvoyPrinted(t *testing.T) {
 	}
 }
 
+// A collect reads the round its name read when the command ran, and takes
+// its own block of the output: two collects in one call each keep their own
+// status, and a dispatch later in the call is a new round, not the one
+// collected.
+func TestACollectReadsTheRoundItsCommandNamed(t *testing.T) {
+	const run = "envoy run %s --with codex --prompt-file /tmp/p.md"
+	tr := fixture.New()
+	tr.Bash(fmt.Sprintf(run, "review-r1"), "Command running in background")
+	tr.Bash(fmt.Sprintf(run, "review-r2"), "Command running in background")
+	tr.Bash("envoy collect review-r1; envoy collect review-r2",
+		fmt.Sprintf(collected, "review-r1", "ok")+"\n"+fmt.Sprintf(collected, "review-r2", "partial"))
+	want(t, load(t, tr),
+		"round | review-r1 | ok | collected | dispatched",
+		"round | review-r2 | partial | collected | dispatched",
+	)
+
+	tr = fixture.New()
+	tr.Bash(fmt.Sprintf(run, "review-r1"), "Command running in background")
+	tr.Bash("envoy collect review-r1; "+fmt.Sprintf(run, "review-r1"), fmt.Sprintf(collected, "review-r1", "ok"))
+	rec := load(t, tr)
+	want(t, rec,
+		"round | review-r1 | ok | collected | dispatched",
+		"round | review-r1 | dispatched",
+	)
+	if out := rec.Uncollected(); len(out) != 1 || !out[0].At.After(rec.Events[0].At) {
+		t.Errorf("the later dispatch is the one with no collect: %+v", out)
+	}
+
+	// A fan-out collected through a variable is one round under the set's
+	// name, with the set's status. Its members are not rounds.
+	tr = fixture.New()
+	tr.Bash(`envoy collect "$(cat /tmp/job)"`, "fan-out: /jobs/app-1/review-r1\nstatus: partial — 1 of 2 turns returned a result\n\n"+
+		"=== member codex ===\njob: /jobs/app-1/review-r1/codex\nstatus: ok\n\n=== member claude ===\njob: /jobs/app-1/review-r1/claude\nstatus: failed\n")
+	want(t, load(t, tr), "round | review-r1 | partial | collected")
+}
+
+// What a run's call returned is read against what envoy printed. An error
+// with no job line ran nothing: it replaces no round, and a collect by the
+// name reads the round the name read before. An error after envoy's job line
+// is a job that exists, so a collect joins it. A job envoy says ended ok did
+// not fail, whatever a later command of the call returned.
+func TestARunIsReadAgainstWhatEnvoyPrinted(t *testing.T) {
+	const run = "envoy run review-r1 --with codex --prompt-file /tmp/p.md"
+	started := "job: /jobs/app-1/review-r1\nprovider: codex\nnext: let this command run to completion\n"
+
+	// Dispatched, a retry that ran nothing, a dispatch that replaces the
+	// first, and a collect of that one.
+	tr := fixture.New()
+	tr.Bash(run, "Command running in background")
+	tr.BashError(run, "envoy: unknown voice")
+	tr.Bash(run, "Command running in background")
+	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "ok"))
+	rec := load(t, tr)
+	want(t, rec,
+		"round | review-r1 | dispatched | replaced",
+		"round | review-r1 | dispatched | failed",
+		"round | review-r1 | ok | ×2 | collected | dispatched",
+	)
+
+	// A run that ran nothing, then a collect: the job is not this session's.
+	tr = fixture.New()
+	tr.BashError(run, "envoy: unknown voice")
+	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "partial"))
+	rec = load(t, tr)
+	want(t, rec, "round | review-r1 | dispatched | failed", "round | review-r1 | partial | collected")
+	if st := Summarise(rec.Events, labels)[0]; st.Latest == nil || st.Latest.Outcome != "partial" {
+		t.Errorf("the collect is the label's latest event: %+v", st.Latest)
+	}
+
+	// A run that created its job and returned an error, then its collect:
+	// one round, which is the label's latest event because a result came back.
+	tr = fixture.New()
+	tr.BashError(run, started+"status: timeout — the turn hit its cap\n")
+	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "timeout"))
+	rec = load(t, tr)
+	want(t, rec, "round | review-r1 | timeout | collected | dispatched | failed")
+	if st := Summarise(rec.Events, labels)[0]; st.Latest == nil || st.Latest.Name != "review-r1" {
+		t.Errorf("a collected round is the label's latest event: %+v", st.Latest)
+	}
+
+	// The job ended ok and a later command failed the call.
+	tr = fixture.New()
+	tr.BashError(run+"; false", started+"status: ok\n")
+	want(t, load(t, tr), "round | review-r1 | dispatched")
+}
+
 // Obligation 18.
 func TestMentions(t *testing.T) {
 	tr := fixture.New()
@@ -805,6 +881,55 @@ func TestSignalsCountWhatTheReaderMissed(t *testing.T) {
 	// The pull request is shown from its URL, so the view warns of six.
 	if len(rec.Missed()) != 6 {
 		t.Errorf("Missed(): %+v", rec.Missed())
+	}
+}
+
+// A store that cannot be read is not a store with nothing in it: the record
+// says unreadable and where, and a listing fails rather than come back
+// short. A projects directory that does not exist holds no transcript.
+func TestAStoreThatCannotBeReadIsNotEmpty(t *testing.T) {
+	dir := t.TempDir()
+	blocked := fixture.WriteFile(t, filepath.Join(dir, "projects"), []byte("not a directory"))
+	l := NewLoader(config.Config{ProjectsDir: blocked, NotesDir: filepath.Join(dir, "notes")})
+	if rec := l.Load(session); rec.Status != Unreadable || rec.Path != blocked {
+		t.Errorf("a projects path that is a file: status %s, path %q", rec.Status, rec.Path)
+	}
+	if _, err := l.Recent(time.Time{}); err == nil {
+		t.Error("the sessions of a store that cannot be listed were listed")
+	}
+	if _, err := l.Resolve("11111111"); err == nil || !strings.Contains(err.Error(), blocked) {
+		t.Errorf("resolve should say what it could not read: %v", err)
+	}
+
+	// One project directory that cannot be listed, beside one that holds the
+	// transcript: the transcript is read, and the listing still fails.
+	projects := filepath.Join(dir, "store")
+	fixture.New().Prompt("x").Write(t, projects, "open", session)
+	closed := filepath.Join(projects, "closed")
+	if err := os.Mkdir(closed, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(closed, 0o755) })
+	if _, err := os.ReadDir(closed); err == nil {
+		t.Skip("this user can read a directory with no permissions")
+	}
+	l = NewLoader(config.Config{ProjectsDir: projects, NotesDir: filepath.Join(dir, "notes")})
+	if rec := l.Load(session); rec.Status != OK {
+		t.Errorf("a transcript beside an unreadable directory: status %s", rec.Status)
+	}
+	if rec := l.Load(fixture.ID("22222222")); rec.Status != Unreadable || rec.Path != filepath.Join(closed, fixture.ID("22222222")+".jsonl") {
+		t.Errorf("a transcript that may be in the unreadable directory: status %s, path %q", rec.Status, rec.Path)
+	}
+	if _, err := l.Recent(time.Time{}); err == nil {
+		t.Error("the listing left a directory out without saying so")
+	}
+
+	none := NewLoader(config.Config{ProjectsDir: filepath.Join(dir, "absent"), NotesDir: filepath.Join(dir, "notes")})
+	if rec := none.Load(session); rec.Status != Missing {
+		t.Errorf("no projects directory: status %s", rec.Status)
+	}
+	if ids, err := none.Recent(time.Time{}); err != nil || len(ids) != 0 {
+		t.Errorf("no projects directory: %v, %v", ids, err)
 	}
 }
 

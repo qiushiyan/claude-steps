@@ -49,7 +49,9 @@ type Event struct {
 	// Via tells a slash command the user typed ("slash") from a Skill call
 	// the model made ("tool").
 	Via string `json:"via,omitempty"`
-	// Failed: the skill call, or the envoy run call, returned an error.
+	// Failed: the skill call, or the call that ran envoy for a round,
+	// returned an error. A round's run did not fail when envoy's own output
+	// says the job ended ok.
 	Failed bool `json:"failed,omitempty"`
 
 	// Names are the labelled skills a mention's prompt names.
@@ -70,9 +72,15 @@ type Event struct {
 	// collect seen in between. envoy collects a name as its latest dispatch,
 	// so no collect of this one can follow.
 	Redispatched bool `json:"redispatched,omitempty"`
+	// Dispatches counts the times the session dispatched the round, when
+	// that is more than once: its own dispatch and those it replaced.
+	Dispatches int `json:"dispatches,omitempty"`
 	// Outcome is the first word of the collect's status line, as envoy
-	// printed it, or "error" when the collect call itself failed.
+	// printed it.
 	Outcome string `json:"outcome,omitempty"`
+	// CollectFailed: the collect call returned an error and printed no
+	// status.
+	CollectFailed bool `json:"collect_failed,omitempty"`
 
 	Repo   string `json:"repo,omitempty"`
 	Number int    `json:"number,omitempty"`
@@ -176,9 +184,16 @@ func (r Record) Compactions() []Event { return r.of(Compaction) }
 func (r Record) Uncollected() []Event {
 	var out []Event
 	for _, e := range r.Events {
-		if e.Kind == Round && e.Dispatched && !e.Failed && !e.Redispatched && e.CollectedAt == nil {
+		if e.Waiting() {
 			out = append(out, e)
 		}
 	}
 	return out
+}
+
+// Waiting reports whether an event is a round this session dispatched that
+// the transcript holds nothing more of: no error from its run, no later
+// dispatch under its name, and no collect.
+func (e Event) Waiting() bool {
+	return e.Kind == Round && e.Dispatched && !e.Failed && !e.Redispatched && e.CollectedAt == nil
 }

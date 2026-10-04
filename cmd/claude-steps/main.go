@@ -368,7 +368,10 @@ func (a *app) check(args []string) error {
 	if len(rest) > 0 {
 		return errors.New("check takes no arguments")
 	}
-	ids := a.loader.Recent(a.now().Add(-checkWindow))
+	ids, err := a.loader.Recent(a.now().Add(-checkWindow))
+	if err != nil {
+		return fmt.Errorf("the transcripts could not all be listed, so nothing was checked: %w", err)
+	}
 	records := make([]record.Record, len(ids))
 	var wg sync.WaitGroup
 	gate := make(chan struct{}, 4)

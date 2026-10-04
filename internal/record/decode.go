@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"maps"
-	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -76,15 +75,10 @@ const (
 var (
 	commandName = regexp.MustCompile(`<command-name>/([^<\s]+)</command-name>`)
 	commandArgs = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
-	// "status: ok", "status: partial — 1 of 2 …": the word envoy opens with.
-	statusLine = regexp.MustCompile(`(?m)^status:[ \t]*([A-Za-z][\w-]*)`)
-	jobLine    = regexp.MustCompile(`(?m)^job:[ \t]*(\S+)`)
 	// "[main 1a2b3c4] subject", the line git prints for a commit it made.
 	gitSummary = regexp.MustCompile(`(?m)^\[[^\]\s]+( \([^)]*\))? [0-9a-f]{7,40}\] `)
 	pullURL    = regexp.MustCompile(`https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)`)
-	jobReuse   = regexp.MustCompile(`\+\d+$`)
 	skillFile  = regexp.MustCompile(`(?:^|/)skills/([^/]+)/SKILL\.md$`)
-	envoyCall  = regexp.MustCompile(`\benvoy\s+(run|collect)\b`)
 	// Claude Code wraps text the user pasted in this tag. It is the harness's
 	// mark, not the user's words.
 	pastedTag = regexp.MustCompile(`</?pasted_content\b[^>]*>`)
@@ -116,16 +110,14 @@ func compileMentions(names []string) []mention {
 	return out
 }
 
+// bashCall is what a Bash call ran of each fact the reader lifts from one,
+// kept until the call's result says what happened.
 type bashCall struct {
 	at             time.Time
 	commits        []commitCommand
-	runs           []int    // indexes of the round events this call dispatched
-	collects       []string // job arguments of `envoy collect`
-	unnamed        int      // `envoy collect` calls whose job the text does not give
-	createsPR      bool
-	probes         int // `envoy collect --status-only` calls
 	mentionsCommit bool
-	mentionsEnvoy  bool
+	envoy          roundCall
+	createsPR      bool
 }
 
 type slashCommand struct {
@@ -154,7 +146,7 @@ type decoder struct {
 	skillCalls map[string]int       // Skill tool call id → its event
 	reads      map[string]Event     // Read call id → the skill file it read
 	bash       map[string]*bashCall // Bash tool call id → what it ran
-	rounds     map[string]int       // envoy job → its latest round event
+	rounds     rounds               // the envoy rounds, joined in rounds.go
 	prs        map[string]int       // pull request URL → its event
 	created    map[string]time.Time // URLs `gh pr create` returned → the call
 	slash      *slashCommand        // a slash command waiting for its expansion
@@ -169,7 +161,7 @@ func newDecoder(rec *Record, snippets config.Snippets, mentions []mention) *deco
 	for _, m := range mentions {
 		labelled[m.name] = true
 	}
-	return &decoder{
+	d := &decoder{
 		snippets:   snippets,
 		mentions:   mentions,
 		labelled:   labelled,
@@ -177,10 +169,11 @@ func newDecoder(rec *Record, snippets config.Snippets, mentions []mention) *deco
 		skillCalls: map[string]int{},
 		reads:      map[string]Event{},
 		bash:       map[string]*bashCall{},
-		rounds:     map[string]int{},
 		prs:        map[string]int{},
 		created:    map[string]time.Time{},
 	}
+	d.rounds = newRounds(rec, &d.sig.round)
+	return d
 }
 
 // read decodes the whole transcript. A row counts as recognised only once
@@ -343,9 +336,10 @@ func (d *decoder) assistant(at time.Time, blocks []block) bool {
 // A call the tool ran in the background returns before anything in it has
 // finished, so each of its commits is guarded.
 func (d *decoder) bashCommand(at time.Time, command string, background bool) *bashCall {
-	call := &bashCall{at: at, mentionsCommit: strings.Contains(command, "commit"), mentionsEnvoy: envoyCall.MatchString(command)}
+	call := &bashCall{at: at, mentionsCommit: strings.Contains(command, "commit")}
+	call.envoy.mentions = envoyCall.MatchString(command)
 	// Text that does not parse yields no commands; a commit or round in it
-	// shows as a miss in the second traces below.
+	// shows as a miss in the second traces.
 	cmds, _ := shell.Split(command, d.cwd)
 	for _, c := range cmds {
 		argv := c.Argv()
@@ -356,39 +350,7 @@ func (d *decoder) bashCommand(at time.Time, command string, background bool) *ba
 			commit.guarded = c.Guarded || background
 			call.commits = append(call.commits, commit)
 		}
-		if job, ok := envoyJob(argv, "run"); ok {
-			if !named(job) {
-				// A dispatch under a name the text does not give is a round
-				// the reader cannot show.
-				d.sig.round.Second++
-				d.sig.round.Missed++
-				continue
-			}
-			// A name dispatched again before any collect: the collect that
-			// follows is of this dispatch.
-			if prev, ok := d.rounds[job]; ok {
-				if e := &d.rec.Events[prev]; e.Dispatched && e.CollectedAt == nil {
-					e.Redispatched = true
-				}
-			}
-			idx := d.add(Event{At: at, Kind: Round, Name: job, Dispatched: true})
-			d.rounds[job] = idx
-			call.runs = append(call.runs, idx)
-			d.sig.round.Primary++
-		}
-		// `collect --status-only` asks whether the job is still running; it
-		// delivers no result, so it is not a collect.
-		if job, ok := envoyJob(argv, "collect"); ok {
-			switch {
-			case slices.Contains(argv, "--status-only"):
-				call.probes++
-			case !named(job):
-				call.unnamed++
-			default:
-				call.collects = append(call.collects, job)
-			}
-			d.sig.round.Primary++
-		}
+		d.rounds.command(&call.envoy, at, argv)
 		if len(argv) >= 3 && argv[0] == "gh" && argv[1] == "pr" && argv[2] == "create" {
 			call.createsPR = true
 		}
@@ -531,59 +493,8 @@ func (d *decoder) result(at time.Time, b block) {
 	delete(d.bash, b.ToolUseID)
 	text, _, _ := content(b.Content)
 
-	// A call that returned an error made no commit, unless git's own summary
-	// line is in the output: the commit succeeded and a later command failed.
-	// A guarded commit may have been skipped by a call that succeeded, so it
-	// counts on the summary line alone. Most commits run with -q and print
-	// none, which is why an unguarded one needs only the call's success.
-	committed := gitSummary.MatchString(text)
-	for _, c := range call.commits {
-		if committed || !b.IsError && !c.guarded {
-			d.add(Event{At: call.at, Kind: Commit, Text: c.subject, Amend: c.amend, Dir: c.dir})
-			d.sig.commit.Primary++
-		}
-	}
-	if committed {
-		d.sig.commit.Second++
-		if len(call.commits) == 0 && call.mentionsCommit {
-			d.sig.commit.Missed++
-		}
-	}
-
-	if b.IsError {
-		for _, idx := range call.runs {
-			d.rec.Events[idx].Failed = true
-		}
-	}
-	outcome := ""
-	if m := statusLine.FindStringSubmatch(text); m != nil {
-		outcome = m[1]
-	} else if b.IsError {
-		outcome = "error"
-	}
-	// A collect whose job the text does not give (a loop's variable, a command
-	// substitution) is named by the job lines envoy printed. With none, it is
-	// a round the reader cannot show.
-	if call.unnamed > 0 {
-		printed := jobLine.FindAllStringSubmatch(text, -1)
-		for _, m := range printed {
-			call.collects = append(call.collects, m[1])
-		}
-		if len(printed) == 0 {
-			d.sig.round.Second++
-			d.sig.round.Missed++
-		}
-	}
-	for _, job := range call.collects {
-		d.collect(job, call.at, at, outcome)
-	}
-	if jobLine.MatchString(text) && statusLine.MatchString(text) {
-		d.sig.round.Second++
-		if len(call.collects)+len(call.runs)+call.probes == 0 && call.mentionsEnvoy {
-			d.sig.round.Missed++
-		}
-	}
-
+	d.committed(call, b.IsError, text)
+	d.rounds.settle(&call.envoy, call.at, at, b.IsError, text)
 	if call.createsPR && !b.IsError {
 		for _, url := range pullURL.FindAllString(text, -1) {
 			if _, seen := d.created[url]; !seen {
@@ -593,41 +504,26 @@ func (d *decoder) result(at time.Time, b block) {
 	}
 }
 
-// collect joins a collect to the latest round dispatched under the job's
-// name. A later collect that printed a status replaces an earlier one; one
-// that printed none (`--result-only`, or output sent to a file) leaves the
-// status already read. A job this session never dispatched becomes a round of
-// its own, dated at the collect call.
-func (d *decoder) collect(arg string, called, returned time.Time, outcome string) {
-	job := d.jobName(arg)
-	idx, ok := d.rounds[job]
-	if !ok {
-		idx = d.add(Event{At: called, Kind: Round, Name: job})
-		d.rounds[job] = idx
-	}
-	e := &d.rec.Events[idx]
-	if e.CollectedAt != nil && outcome == "" {
-		return
-	}
-	e.CollectedAt, e.Outcome = &returned, outcome
-}
-
-// jobName reduces a collect's argument to a job name. envoy takes a name or
-// a directory path; a path ends in the job's directory, which carries "+2",
-// "+3" when the name was reused, or in a fan-out member's directory under it.
-func (d *decoder) jobName(arg string) string {
-	if !strings.Contains(arg, "/") {
-		return arg
-	}
-	clean := path.Clean(arg)
-	base := jobReuse.ReplaceAllString(path.Base(clean), "")
-	parent := jobReuse.ReplaceAllString(path.Base(path.Dir(clean)), "")
-	if _, ok := d.rounds[base]; !ok {
-		if _, ok := d.rounds[parent]; ok {
-			return parent
+// committed settles a call's commits with its result. A call that returned an
+// error made no commit, unless git's own summary line is in the output: the
+// commit succeeded and a later command failed. A guarded commit may have been
+// skipped by a call that succeeded, so it counts on the summary line alone.
+// Most commits run with -q and print none, which is why an unguarded one
+// needs only the call's success.
+func (d *decoder) committed(call *bashCall, failed bool, text string) {
+	summary := gitSummary.MatchString(text)
+	for _, c := range call.commits {
+		if summary || !failed && !c.guarded {
+			d.add(Event{At: call.at, Kind: Commit, Text: c.subject, Amend: c.amend, Dir: c.dir})
+			d.sig.commit.Primary++
 		}
 	}
-	return base
+	if summary {
+		d.sig.commit.Second++
+		if len(call.commits) == 0 && call.mentionsCommit {
+			d.sig.commit.Missed++
+		}
+	}
 }
 
 func (d *decoder) finish() {
