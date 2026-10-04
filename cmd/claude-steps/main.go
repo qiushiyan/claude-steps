@@ -69,9 +69,9 @@ board --ids starts every line with the pane id, a tab, the session id and a
 tab, for a picker.
 --json prints RFC 3339 times and no relative ones.
 check counts each fact two ways over the last week's transcripts. It exits
-non-zero when a transcript is unreadable or has lines that do not decode, or
-when a second trace saw more than one fact in ten that the reader's own rule
-missed.
+non-zero when the transcripts cannot all be listed, when one is unreadable or
+has lines that do not decode, or when a second trace saw more than one fact
+in ten that the reader's own rule missed.
 
 Labels (the board's columns) and paths: ~/.config/claude-steps/config.toml
 Notes: $XDG_STATE_HOME/claude-steps/notes, default ~/.local/state
