@@ -1,6 +1,8 @@
 package render
 
 import (
+	"fmt"
+	"io"
 	"strings"
 
 	"github.com/mattn/go-runewidth"
@@ -169,6 +171,38 @@ func (v View) lay(rows [][]cell, gap int) []string {
 		lines = append(lines, b.String())
 	}
 	return lines
+}
+
+// trow is a row that ends in free text, which is cut to the room the cells
+// before it leave.
+type trow struct {
+	lead  []cell
+	text  string
+	style style
+}
+
+// table prints rows in columns behind an indent. A row's text is cut to the
+// room left in the view's width, or to most columns when the width is not
+// known.
+func (v View) table(w io.Writer, indent string, rows []trow, most int) {
+	leads, cols := make([][]cell, len(rows)), 0
+	for i, r := range rows {
+		leads[i] = r.lead
+		cols = max(cols, len(r.lead))
+	}
+	room := most
+	if v.Width > 0 {
+		room = max(v.Width-width(indent)-starts(leads, viewGap)[cols], textFloor)
+	}
+	for i, r := range rows {
+		for len(leads[i]) < cols {
+			leads[i] = append(leads[i], cell{})
+		}
+		leads[i] = append(leads[i], of(r.style, cut(r.text, room)))
+	}
+	for _, line := range v.lay(leads, viewGap) {
+		fmt.Fprintln(w, indent+line)
+	}
 }
 
 // cells measures text as a terminal draws it: a CJK character takes two
