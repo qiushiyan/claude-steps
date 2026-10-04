@@ -263,6 +263,14 @@ func TestARunIsReadAgainstWhatEnvoyPrinted(t *testing.T) {
 		t.Errorf("a collected round is the label's latest event: %+v", st.Latest)
 	}
 
+	// A run whose output was cut to its last lines shows no block of its own.
+	// The block the output does hold is the collect's: its status follows its
+	// job line.
+	tr = fixture.New()
+	tr.Bash(run+" 2>&1 | tail -3; envoy collect review-r1 2>&1 | tail -22",
+		"status: failed — the provider reported a failure\nresult: /jobs/app-1/review-r1/result.md\njob: /jobs/app-1/review-r1\nstatus: failed — the provider reported a failure\n")
+	want(t, load(t, tr), "round | review-r1 | failed | collected | dispatched")
+
 	// The job ended ok and a later command failed the call.
 	tr = fixture.New()
 	tr.BashError(run+"; false", started+"status: ok\n")

@@ -16,10 +16,11 @@ import (
 
 var (
 	// envoy heads a job's block with "job: <dir>" and a fan-out's with
-	// "fan-out: <dir>"; "status: ok" or "status: partial — 1 of 2 …" follows
-	// either. Inside a fan-out, "=== member <name> ===" opens each member's
-	// own block.
-	envoyLine = regexp.MustCompile(`(?m)^(?:job:[ \t]*(\S+)|fan-out:[ \t]*(\S*/\S*)|status:[ \t]*([A-Za-z][\w-]*)|(=== member .* ===))`)
+	// "fan-out: <dir>"; "status: ok" or "status: partial — 1 of 2 …" follows.
+	// A collect prints the status on the next line. A run prints its
+	// settings there and the status when the job ends. Inside a fan-out,
+	// "=== member <name> ===" opens each member's own block.
+	envoyLine = regexp.MustCompile(`^(?:job:[ \t]*(\S+)|fan-out:[ \t]*(\S*/\S*)|status:[ \t]*([A-Za-z][\w-]*)|(=== member .* ===))`)
 	// The two lines on their own, for the second trace and for a status no
 	// block holds.
 	statusLine = regexp.MustCompile(`(?m)^status:[ \t]*([A-Za-z][\w-]*)`)
@@ -118,12 +119,12 @@ func (r *rounds) dispatch(at time.Time, job string) roundOp {
 
 // settle reads a call's result: whether each run dispatched anything, and
 // what envoy said of each job collected. Each command takes its own block of
-// the output, in the order the commands ran.
+// the output, a run's or a collect's, in the order the commands ran.
 func (r *rounds) settle(call *roundCall, called, returned time.Time, failed bool, text string) {
 	blocks := envoyBlocks(text)
-	take := func(job string) (status string, printed bool) {
+	take := func(job string, collect bool) (status string, printed bool) {
 		for i := range blocks {
-			if b := &blocks[i]; !b.taken && r.jobName(b.dir) == job {
+			if b := &blocks[i]; !b.taken && b.collect == collect && r.jobName(b.dir) == job {
 				b.taken = true
 				return b.status, true
 			}
@@ -131,7 +132,7 @@ func (r *rounds) settle(call *roundCall, called, returned time.Time, failed bool
 		return "", false
 	}
 	for _, op := range call.ops {
-		status, printed := take(op.job)
+		status, printed := take(op.job, !op.run)
 		if op.run {
 			r.ran(op, failed, status, printed)
 			continue
@@ -147,13 +148,13 @@ func (r *rounds) settle(call *roundCall, called, returned time.Time, failed bool
 		r.collected(op.job, op.round, called, returned, status, failed && status == "")
 	}
 	// A collect whose job the text does not give (a loop's variable, a
-	// command substitution) is named by the blocks no other command took.
-	// With none, it is a round the reader cannot show.
+	// command substitution) is named by the collect blocks no other command
+	// took. With none, it is a round the reader cannot show.
 	if call.unnamed > 0 {
 		found := false
 		for i := range blocks {
 			b := &blocks[i]
-			if b.taken {
+			if b.taken || !b.collect {
 				continue
 			}
 			b.taken, found = true, true
@@ -248,6 +249,7 @@ func (r *rounds) jobName(arg string) string {
 // and the first word of its status line, "" when it printed none.
 type envoyBlock struct {
 	dir, status string
+	collect     bool // a collect printed it: the status is on the line after the job's
 	taken       bool
 }
 
@@ -255,8 +257,14 @@ type envoyBlock struct {
 // own block says the round's status, so its members' blocks are left out.
 func envoyBlocks(text string) []envoyBlock {
 	var out []envoyBlock
-	open, member := false, false
-	for _, m := range envoyLine.FindAllStringSubmatch(text, -1) {
+	open, member, headed := false, false, false
+	for line := range strings.Lines(text) {
+		m := envoyLine.FindStringSubmatch(line)
+		after := headed // the line before this one headed a block
+		headed = false
+		if m == nil {
+			continue
+		}
 		dir := m[1] + m[2]
 		switch {
 		case m[4] != "":
@@ -267,9 +275,9 @@ func envoyBlocks(text string) []envoyBlock {
 			member = false
 		case dir != "":
 			out = append(out, envoyBlock{dir: dir})
-			open = true
+			open, headed = true, true
 		case open && out[len(out)-1].status == "":
-			out[len(out)-1].status = m[3]
+			out[len(out)-1].status, out[len(out)-1].collect = m[3], after
 		}
 	}
 	return out
