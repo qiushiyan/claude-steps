@@ -120,3 +120,18 @@ func TestUnknownKeyIsRefused(t *testing.T) {
 		t.Errorf("got %v", err)
 	}
 }
+
+// A label may name its hue. Red is not on offer: it marks errors.
+func TestLabelColor(t *testing.T) {
+	dir := home(t)
+	file := filepath.Join(dir, ".config", "claude-steps", "config.toml")
+	write(t, file, "[[label]]\nname = \"review\"\ncolor = \"cyan\"\n\n[[label]]\nname = \"docs\"\n")
+	cfg, err := Load()
+	if err != nil || cfg.Labels[0].Color != "cyan" || cfg.Labels[1].Color != "" {
+		t.Errorf("got %+v, %v", cfg.Labels, err)
+	}
+	write(t, file, "[[label]]\nname = \"review\"\ncolor = \"red\"\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), `color "red" is not one of blue`) {
+		t.Errorf("got %v", err)
+	}
+}

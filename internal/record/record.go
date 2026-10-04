@@ -161,3 +161,16 @@ func (r Record) PullRequests() []Event { return r.of(PR) }
 
 // Compactions returns the compactions of the main conversation.
 func (r Record) Compactions() []Event { return r.of(Compaction) }
+
+// Uncollected returns the rounds this session dispatched for which the
+// transcript holds no collect, oldest first. It cannot tell a round still
+// running from one collected in another session or given up on.
+func (r Record) Uncollected() []Event {
+	var out []Event
+	for _, e := range r.Events {
+		if e.Kind == Round && e.Dispatched && !e.Failed && e.CollectedAt == nil {
+			out = append(out, e)
+		}
+	}
+	return out
+}

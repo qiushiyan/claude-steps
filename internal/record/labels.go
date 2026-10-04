@@ -33,9 +33,10 @@ func Summarise(events []Event, labels []config.Label) []LabelState {
 		for i := range events {
 			e := &events[i]
 			switch {
-			case e.Kind == Mention && matchesMention(l, e):
+			case !belongs(l, e):
+			case e.Kind == Mention:
 				named = e
-			case !e.Failed && matches(l, e):
+			case !e.Failed:
 				ran = e
 			}
 		}
@@ -55,6 +56,29 @@ func Summarise(events []Event, labels []config.Label) []LabelState {
 		out = append(out, st)
 	}
 	return out
+}
+
+// LabelsOf names the labels an event belongs to, in configuration order.
+// Labels are not exclusive: two may list one skill, and a prompt may name
+// skills of several. A call that failed still belongs, so its failure is read
+// under its label.
+func LabelsOf(labels []config.Label, e Event) []string {
+	var names []string
+	for _, l := range labels {
+		if belongs(l, &e) {
+			names = append(names, l.Name)
+		}
+	}
+	return names
+}
+
+// belongs is the one rule for which label an event is under. Summarise and
+// LabelsOf both read it, so a label's row and its steps cannot disagree.
+func belongs(l config.Label, e *Event) bool {
+	if e.Kind == Mention {
+		return matchesMention(l, e)
+	}
+	return matches(l, e)
 }
 
 func matches(l config.Label, e *Event) bool {

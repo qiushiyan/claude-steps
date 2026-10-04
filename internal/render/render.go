@@ -1,9 +1,10 @@
 // Package render turns records into the text and JSON the command prints.
-// Its functions are pure: the current time and the home directory come in
-// through View.
+// Its functions are pure: the current time, the home directory, the width to
+// fill and whether to colour come in through View.
 //
 // Nothing here says a check is finished or still holds. A line states what the
-// transcript holds and when it happened.
+// transcript holds and when it happened, and colour follows the same rule: a
+// hue names a label or marks a problem, and never grades a date.
 package render
 
 import (
@@ -15,8 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dustin/go-humanize"
-
+	"github.com/qiushiyan/claude-steps/internal/config"
 	"github.com/qiushiyan/claude-steps/internal/panes"
 	"github.com/qiushiyan/claude-steps/internal/record"
 )
@@ -32,22 +32,27 @@ type Session struct {
 type View struct {
 	Now  time.Time
 	Home string // shown as "~" in paths
+	// Labels are the configured labels in order: the board's columns, the
+	// tags on a session's steps, and the hue each name is drawn in.
+	Labels []config.Label
+	// Width is the columns a line may fill, or 0 when that is not known.
+	Width int
+	// Color writes escape codes.
+	Color bool
 }
 
 const (
-	titleWidth = 34
-	labelWidth = 70
-	noteWidth  = 48
-	textWidth  = 96
+	titleWidth = 34 // a session's title on the board, at most
+	noteWidth  = 48 // a note on the board when the width is not known
+	labelWidth = 70 // a label's latest event when the width is not known
+	textWidth  = 96 // an event's text when the width is not known
+	textFloor  = 24 // the least room an event's text is cut to
+	ruleWidth  = 72 // the rule under the header when the width is not known
+	shown      = 3  // the notes and the uncollected rounds a session view lists
+	viewGap    = 3
+	boardGap   = 2
 	nothing    = "·"
 )
-
-func (v View) ago(at time.Time) string {
-	if at.IsZero() {
-		return "at an unknown time"
-	}
-	return humanize.RelTime(at, v.Now, "ago", "from now")
-}
 
 func (v View) path(p string) string {
 	if v.Home != "" {
@@ -102,7 +107,7 @@ func (v View) describe(e record.Event) string {
 		}
 		return "compaction"
 	case record.Note:
-		return "note: " + oneLine(e.Text)
+		return oneLine(e.Text)
 	}
 	return string(e.Kind)
 }
@@ -127,30 +132,86 @@ func dispatch(e record.Event) string {
 	return "dispatched"
 }
 
-// rows are the timeline's lines. A round this session dispatched and
-// collected is two lines, each at its own time.
-func (v View) rows(timeline []record.Event) []dated {
-	var out []dated
-	for _, e := range timeline {
-		if e.Kind == record.Round && e.Dispatched && e.CollectedAt != nil {
-			out = append(out, dated{e.At, "  " + e.Name + "  " + dispatch(e), e.Kind},
-				dated{*e.CollectedAt, "  " + v.describe(e), e.Kind})
+// line is one dated row of a session's timeline.
+type line struct {
+	at     time.Time
+	kind   record.Kind
+	labels []string // the labels the event is under
+	text   string
+	style  style
+	times  int  // how many equal lines in a row this one stands for
+	count  bool // a count of commits, which has no time of its own
+}
+
+// lines are a session's timeline, oldest first. A round this session
+// dispatched and collected is two lines, each at its own time.
+func (v View) lines(rec record.Record) []line {
+	var out []line
+	for _, e := range rec.Timeline() {
+		l := line{at: e.At, kind: e.Kind, labels: record.LabelsOf(v.Labels, e), text: v.describe(e)}
+		if e.Failed {
+			l.style = problem
+		}
+		if e.Kind == record.Round && e.CollectedAt != nil {
+			got := l
+			got.at, got.style = *e.CollectedAt, plain
+			if e.Outcome == "error" {
+				got.style = problem
+			}
+			if !e.Dispatched {
+				out = append(out, got)
+				continue
+			}
+			l.text = e.Name + "  " + dispatch(e)
+			out = append(out, l, got)
 			continue
 		}
-		text := v.describe(e)
-		if e.Kind == record.Round {
-			text = "  " + text
-		}
-		out = append(out, dated{e.At, text, e.Kind})
+		out = append(out, l)
 	}
-	slices.SortStableFunc(out, func(a, b dated) int { return a.at.Compare(b.at) })
+	slices.SortStableFunc(out, func(a, b line) int { return a.at.Compare(b.at) })
 	return out
 }
 
-type dated struct {
-	at   time.Time
-	text string
-	kind record.Kind
+// steps keeps the lines read first: those under a label, and the notes. The
+// commits between two of them become one count line, and so do the commits
+// before the first and after the last. Every other line is left to the full
+// history.
+func steps(all []line) []line {
+	var out []line
+	commits := 0
+	flush := func() {
+		if commits > 0 {
+			out = append(out, line{kind: record.Commit, text: plural(commits, "commit"), count: true})
+			commits = 0
+		}
+	}
+	for _, l := range all {
+		switch {
+		case l.kind == record.Commit:
+			commits++
+		case len(l.labels) > 0 || l.kind == record.Note:
+			flush()
+			out = append(out, l)
+		}
+	}
+	flush()
+	return out
+}
+
+// collapse makes a run of equal lines one line, dated at its last, with the
+// count: a scheduled command fires the same line many times.
+func collapse(lines []line) []line {
+	var out []line
+	for _, l := range lines {
+		l.times = 1
+		if n := len(out); n > 0 && l.kind != record.Note && !l.count && out[n-1].kind == l.kind && out[n-1].text == l.text {
+			out[n-1].at = l.at
+			out[n-1].times++
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
 }
 
 func join(head, tail string) string {
@@ -158,18 +219,6 @@ func join(head, tail string) string {
 		return head
 	}
 	return head + "  " + tail
-}
-
-func oneLine(s string) string {
-	return strings.Join(strings.Fields(s), " ")
-}
-
-func clip(s string, n int) string {
-	r := []rune(oneLine(s))
-	if len(r) <= n {
-		return string(r)
-	}
-	return strings.TrimRight(string(r[:n-1]), " ") + "…"
 }
 
 func plural(n int, one string) string {
@@ -212,84 +261,155 @@ func unread(rec record.Record) string {
 	return ""
 }
 
-// Show prints one session: its identity, each label's latest event, the
-// timeline oldest first, and the notes.
-func (v View) Show(w io.Writer, s Session) {
+// Show prints one session with the newest on top: what it is, anything the
+// reader could not read, each label's latest event, the rounds with no
+// collect seen, the notes, and then its steps. With history, or with no label
+// configured, the steps give way to the whole timeline.
+func (v View) Show(w io.Writer, s Session, history bool) {
 	rec := s.Record
-	head := []string{v.title(s), short(rec.ID)}
-	if s.Pane != nil {
-		head = append(head, s.Pane.Where)
-	}
-	fmt.Fprintln(w, strings.Join(head, "   "))
-	if rec.Cwd != "" {
-		fmt.Fprintln(w, join(v.path(rec.Cwd), rec.Branch))
-	}
-
 	readable := rec.Status == record.OK || rec.Status == record.Partial
-	if !readable {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, join(unread(rec), v.path(rec.Path)))
-	} else {
-		var facts []string
+
+	head := of(plain, v.title(s)).add(plain, "   ").add(faint, short(rec.ID))
+	if s.Pane != nil {
+		head = head.add(plain, "   "+s.Pane.Where)
+	}
+	fmt.Fprintln(w, v.paint(head))
+	var where, facts []string
+	if rec.Cwd != "" {
+		where = append(where, join(v.path(rec.Cwd), rec.Branch))
+	}
+	if readable {
 		for _, pr := range rec.PullRequests() {
 			facts = append(facts, v.describe(pr))
 		}
 		if cs := rec.Compactions(); len(cs) > 0 {
 			facts = append(facts, plural(len(cs), "compaction")+", last "+v.ago(cs[len(cs)-1].At))
 		}
-		if len(facts) > 0 {
-			fmt.Fprintln(w, strings.Join(facts, "   "))
-		}
+	}
+	// One line when it fits, so the labels start a line higher.
+	switch under := strings.Join(append(where, facts...), "   "); {
+	case v.Width > 0 && width(under) > v.Width && len(where) > 0 && len(facts) > 0:
+		fmt.Fprintln(w, where[0])
+		fmt.Fprintln(w, strings.Join(facts, "   "))
+	case under != "":
+		fmt.Fprintln(w, under)
+	}
+	// What the view may lack is said before anything it holds.
+	lack := v.caveat(rec)
+	if !readable {
+		lack = join(unread(rec), v.path(rec.Path))
+	}
+	if lack != "" {
+		fmt.Fprintln(w, v.paint(of(problem, lack)))
+	}
+	rule := ruleWidth
+	if v.Width > 0 {
+		rule = v.Width
+	}
+	fmt.Fprintln(w, v.paint(of(faint, strings.Repeat("─", rule))))
+
+	var summary []trow
+	if readable {
 		if len(s.Labels) > 0 {
-			fmt.Fprintln(w)
-			var rows [][]string
+			rows := make([]trow, 0, len(s.Labels))
 			for _, l := range s.Labels {
 				rows = append(rows, v.labelRow(l))
 			}
-			table(w, "", rows)
-		}
-
-		fmt.Fprintln(w)
-		timeline := rec.Timeline()
-		if len(timeline) == 0 {
-			fmt.Fprintln(w, "no events in the transcript")
-		}
-		// A scheduled command fires the same line many times; a run of equal
-		// lines is one line, dated at its last, with the count.
-		var rows [][]string
-		last, run := "", 0
-		for _, e := range v.rows(timeline) {
-			if e.text == last && e.kind != record.Note {
-				run++
-				rows[len(rows)-1] = []string{v.ago(e.at), fmt.Sprintf("%s  (%d times)", e.text, run)}
-				continue
-			}
-			last, run = e.text, 1
-			rows = append(rows, []string{v.ago(e.at), e.text})
-		}
-		table(w, "  ", rows)
-		if note := v.caveat(rec); note != "" {
+			v.table(w, "", rows, labelWidth)
 			fmt.Fprintln(w)
-			fmt.Fprintln(w, note)
 		}
+		summary = v.uncollected(rec)
+	}
+	v.table(w, "", append(summary, v.notes(rec, history)...), textWidth)
+	if !readable {
+		return
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "notes")
-	if len(rec.Notes) == 0 && rec.NotesError == "" {
-		fmt.Fprintln(w, "  none")
+	all := v.lines(rec)
+	switch {
+	case len(all) == 0:
+		fmt.Fprintln(w, "no events in the transcript")
+	case history || len(v.Labels) == 0:
+		fmt.Fprintln(w, v.paint(of(faint, "history")))
+		v.timeline(w, collapse(all))
+	default:
+		fmt.Fprintln(w, v.paint(of(faint, "steps")))
+		st := collapse(steps(all))
+		if len(st) == 0 {
+			fmt.Fprintln(w, "  "+v.paint(of(faint, "none")))
+		}
+		v.timeline(w, st)
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, v.paint(of(faint, plural(len(collapse(all)), "row")+" in the full history (show --all)")))
 	}
-	var rows [][]string
-	for _, n := range rec.Notes {
-		rows = append(rows, []string{v.ago(n.At), oneLine(n.Text)})
+}
+
+// trow is a row that ends in free text, which is cut to the room the cells
+// before it leave.
+type trow struct {
+	lead  []cell
+	text  string
+	style style
+}
+
+// table prints rows in columns behind an indent. A row's text is cut to the
+// room left in the view's width, or to most columns when the width is not
+// known.
+func (v View) table(w io.Writer, indent string, rows []trow, most int) {
+	leads, cols := make([][]cell, len(rows)), 0
+	for i, r := range rows {
+		leads[i] = r.lead
+		cols = max(cols, len(r.lead))
 	}
-	table(w, "  ", rows)
-	if rec.UnreadNotes > 0 {
-		fmt.Fprintln(w, "  "+plural(rec.UnreadNotes, "note line")+" could not be read")
+	room := most
+	if v.Width > 0 {
+		room = max(v.Width-width(indent)-starts(leads, viewGap)[cols], textFloor)
 	}
-	if rec.NotesError != "" {
-		fmt.Fprintln(w, "  "+rec.NotesError)
+	for i, r := range rows {
+		for len(leads[i]) < cols {
+			leads[i] = append(leads[i], cell{})
+		}
+		leads[i] = append(leads[i], of(r.style, cut(r.text, room)))
 	}
+	for _, line := range v.lay(leads, viewGap) {
+		fmt.Fprintln(w, indent+line)
+	}
+}
+
+// quiet are the kinds drawn back in the full history when no label lists
+// them: they are most of its rows, and nothing counts them.
+var quiet = []record.Kind{record.Skill, record.Read, record.Snippet, record.Compaction}
+
+// timeline prints lines newest first: the labels each is under, its time,
+// and its text.
+func (v View) timeline(w io.Writer, lines []line) {
+	rows := make([]trow, 0, len(lines))
+	for _, l := range slices.Backward(lines) {
+		if l.count {
+			rows = append(rows, trow{lead: []cell{{}, {}}, text: l.text})
+			continue
+		}
+		var tags cell
+		for i, name := range l.labels {
+			if i > 0 {
+				tags = tags.add(plain, " ")
+			}
+			tags = tags.add(v.hue(name), name)
+		}
+		if l.kind == record.Note {
+			tags = of(faint, "note")
+		}
+		row := trow{lead: []cell{tags, of(plain, v.brief(l.at))}, text: l.text, style: l.style}
+		if l.times > 1 {
+			row.text += fmt.Sprintf("  (%d times)", l.times)
+		}
+		if len(l.labels) == 0 && l.style == plain && slices.Contains(quiet, l.kind) {
+			row.style = faint
+		}
+		rows = append(rows, row)
+	}
+	v.table(w, "  ", rows, textWidth)
 }
 
 // caveat says what the timeline may be missing: lines that did not decode,
@@ -309,100 +429,240 @@ func (v View) caveat(rec record.Record) string {
 	return strings.Join(parts, "; ")
 }
 
+// loud is how a count of commits made since an event is drawn: strong when
+// there are any. It is the same fact said louder, and never a colour of its
+// own.
+func loud(commits int) style {
+	if commits > 0 {
+		return strong
+	}
+	return plain
+}
+
 // labelCell is a label's board cell: when its latest event happened, with
 // "+N" for the commits made since where the label counts them. It is one of
 //
 //	·   <time>   <time> +N   read <time>   read <time> +N   named <time>
 //
 // and nothing else: a cell carries a date, never a judgement.
-func (v View) labelCell(l record.LabelState) string {
+func (v View) labelCell(l record.LabelState) cell {
 	if l.Latest == nil {
-		return nothing
+		return of(faint, nothing)
 	}
-	cell := v.ago(l.Latest.At)
+	when := v.brief(l.Latest.At)
 	switch l.Latest.Kind {
 	case record.Mention:
-		return "named " + cell
+		return of(plain, "named "+when)
 	case record.Read:
-		cell = "read " + cell
+		when = "read " + when
 	}
-	if l.CommitsSince != nil {
-		cell += fmt.Sprintf(" +%d", *l.CommitsSince)
+	c := of(plain, when)
+	if n := l.CommitsSince; n != nil {
+		c = c.add(plain, " ").add(loud(*n), fmt.Sprintf("+%d", *n))
 	}
-	return cell
+	return c
 }
 
 // labelRow is a label's line in a session view: its name, when its latest
 // event happened, the commits since, and the event itself.
-func (v View) labelRow(l record.LabelState) []string {
+func (v View) labelRow(l record.LabelState) trow {
+	name := of(v.hue(l.Name), l.Name)
 	if l.Latest == nil {
-		return []string{l.Name, nothing}
+		return trow{lead: []cell{name, of(faint, nothing)}}
 	}
-	since := ""
-	if l.CommitsSince != nil {
-		since = plural(*l.CommitsSince, "commit") + " since"
+	var commits cell
+	if n := l.CommitsSince; n != nil {
+		commits = of(loud(*n), plural(*n, "commit")+" since")
 	}
 	// The cell dates a round from its dispatch; the collect says its own time.
-	text := v.describe(*l.Latest)
-	if e := *l.Latest; e.Kind == record.Round && e.Dispatched && e.CollectedAt != nil {
-		text = e.Name + "  " + collect(e, v.ago(*e.CollectedAt))
+	e := *l.Latest
+	row := trow{lead: []cell{name, of(plain, v.ago(e.At)), commits}, text: v.describe(e)}
+	if e.Kind == record.Round && e.CollectedAt != nil {
+		if e.Dispatched {
+			row.text = e.Name + "  " + collect(e, v.ago(*e.CollectedAt))
+		}
+		if e.Outcome == "error" {
+			row.style = problem
+		}
 	}
-	return []string{l.Name, v.ago(l.Latest.At), since, clip(text, labelWidth)}
+	row.text = oneLine(row.text)
+	return row
+}
+
+// uncollected are the rounds dispatched here with no collect in the
+// transcript, newest first, as rows of a session view. The heading says what
+// was seen and no more: such a round may be running, collected from another
+// session, or given up on.
+func (v View) uncollected(rec record.Record) []trow {
+	head := of(faint, "no collect seen")
+	out := rec.Uncollected()
+	if len(out) == 0 {
+		return []trow{{lead: []cell{head, of(faint, nothing)}}}
+	}
+	var rows []trow
+	for i, e := range slices.Backward(out) {
+		if len(out)-i > shown {
+			rows = append(rows, trow{lead: []cell{{}, of(faint, fmt.Sprintf("%d more", i+1))}})
+			break
+		}
+		rows = append(rows, trow{lead: []cell{head, of(plain, e.Name), of(plain, v.ago(e.At))}})
+		head = cell{}
+	}
+	return rows
+}
+
+// uncollectedCell is the same fact on the board: when the newest such round
+// was dispatched, and how many there are when more than one.
+func (v View) uncollectedCell(rec record.Record) cell {
+	out := rec.Uncollected()
+	if len(out) == 0 {
+		return of(faint, nothing)
+	}
+	c := of(plain, v.brief(out[len(out)-1].At))
+	if len(out) > 1 {
+		c = c.add(plain, fmt.Sprintf(" ×%d", len(out)))
+	}
+	return c
+}
+
+// notes are the user's notes as rows of a session view, newest first: the
+// latest few, or with all every one. A note is never cut: it is their words.
+func (v View) notes(rec record.Record, all bool) []trow {
+	head := of(faint, "notes")
+	var rows []trow
+	add := func(cells ...cell) {
+		rows = append(rows, trow{lead: append([]cell{head}, cells...)})
+		head = cell{}
+	}
+	keep := len(rec.Notes)
+	if !all {
+		keep = min(keep, shown)
+	}
+	for i, n := range slices.Backward(rec.Notes) {
+		if len(rec.Notes)-i > keep {
+			add(of(faint, fmt.Sprintf("%d earlier", i+1)))
+			break
+		}
+		add(of(plain, v.ago(n.At)), of(plain, oneLine(n.Text)))
+	}
+	if rec.UnreadNotes > 0 {
+		add(cell{spans: []span{{plural(rec.UnreadNotes, "note line") + " could not be read", problem}}, wide: true})
+	}
+	if rec.NotesError != "" {
+		add(cell{spans: []span{{rec.NotesError, problem}}, wide: true})
+	}
+	if len(rows) == 0 {
+		add(of(faint, "none"))
+	}
+	return rows
+}
+
+// boardRow is one session on the board before its title and note are cut to
+// the room there is.
+type boardRow struct {
+	cells  []cell // every column but the note; cells[1] waits for the title
+	title  string
+	caveat string
+	note   string
 }
 
 // Board prints one row per session. With ids, every line starts with the
 // pane id, a tab, the session id and a tab, both empty on the header line. A
 // picker hides the two fields and acts on them, so a preview or a note goes
 // to the session the row showed, whatever the pane runs by then.
+//
+// When the width is known the title and the note give way to it and the label
+// cells never do. A note with no room is left to the session view.
 func (v View) Board(w io.Writer, sessions []Session, ids bool) {
-	header := []string{"pane", "session"}
-	if len(sessions) > 0 {
-		for _, l := range sessions[0].Labels {
-			header = append(header, l.Name)
-		}
+	header := []cell{of(plain, "pane"), of(plain, "session")}
+	for _, l := range v.Labels {
+		header = append(header, of(v.hue(l.Name), l.Name))
 	}
-	header = append(header, "PR", "compactions", "note")
-	rows := [][]string{header}
-	for _, s := range sessions {
+	header = append(header, of(plain, "no collect"), of(plain, "PR"))
+
+	rows := make([]boardRow, len(sessions))
+	fixed := [][]cell{slices.Replace(slices.Clone(header), 1, 2, cell{})}
+	titleW, noteW := width("session"), 0
+	for i, s := range sessions {
 		rec := s.Record
-		row := []string{"", clip(v.title(s), titleWidth)}
+		r := boardRow{title: v.title(s), cells: []cell{{}, {}}}
 		if s.Pane != nil {
-			row[0] = s.Pane.Where
+			r.cells[0] = of(plain, s.Pane.Where)
 		}
-		note := ""
 		if n := len(rec.Notes); n > 0 {
-			note = clip(rec.Notes[n-1].Text, noteWidth)
+			r.note = clip(rec.Notes[n-1].Text, noteWidth)
 			if n > 1 {
-				note = fmt.Sprintf("(%d) %s", n, note)
+				r.note = fmt.Sprintf("(%d) %s", n, r.note)
 			}
 		}
 		if rec.Status == record.Missing || rec.Status == record.Unreadable {
-			row = append(row, unread(rec))
-			for len(row) < len(header)-1 {
-				row = append(row, "")
+			r.cells = append(r.cells, cell{spans: []span{{unread(rec), problem}}, wide: true})
+		} else {
+			for _, l := range s.Labels {
+				r.cells = append(r.cells, v.labelCell(l))
 			}
-			rows = append(rows, append(row, note))
-			continue
+			prs := of(faint, nothing)
+			if list := rec.PullRequests(); len(list) > 0 {
+				var numbers []string
+				for _, pr := range list {
+					numbers = append(numbers, fmt.Sprintf("#%d", pr.Number))
+				}
+				prs = of(plain, strings.Join(numbers, " "))
+			}
+			r.cells = append(r.cells, v.uncollectedCell(rec), prs)
+			if r.caveat = v.caveat(rec); r.caveat != "" {
+				r.note = strings.TrimSpace("[" + r.caveat + "] " + r.note)
+			}
 		}
-		for _, l := range s.Labels {
-			row = append(row, v.labelCell(l))
+		for len(r.cells) < len(header) {
+			r.cells = append(r.cells, cell{})
 		}
-		var prs []string
-		for _, pr := range rec.PullRequests() {
-			prs = append(prs, fmt.Sprintf("#%d", pr.Number))
+		titleW = max(titleW, min(width(r.title)+r.mark().width(), titleWidth))
+		noteW = max(noteW, width(r.note))
+		rows[i] = r
+		fixed = append(fixed, r.cells)
+	}
+	if noteW > 0 {
+		noteW = max(noteW, width("note"))
+	}
+	if v.Width > 0 {
+		// Every other column keeps its width. The title gives way first, then
+		// the note, and a note with no room left goes.
+		rest := starts(fixed, boardGap)[len(header)]
+		over := func() int {
+			total := rest + titleW
+			if noteW > 0 {
+				total += boardGap + noteW
+			}
+			return total - v.Width
 		}
-		if len(prs) == 0 {
-			prs = []string{nothing}
+		shrink := func(w *int, floor int) {
+			if n := over(); n > 0 && *w > floor {
+				*w = max(floor, *w-n)
+			}
 		}
-		if caveat := v.caveat(rec); caveat != "" {
-			note = strings.TrimSpace("[" + caveat + "] " + note)
+		shrink(&titleW, 20)
+		shrink(&noteW, 16)
+		shrink(&titleW, 12)
+		if over() > 0 {
+			noteW = 0
 		}
-		row = append(row, strings.Join(prs, " "), fmt.Sprint(len(rec.Compactions())), note)
-		rows = append(rows, row)
 	}
 
-	lines := align(rows)
-	for i, line := range lines {
+	table := make([][]cell, 0, len(rows)+1)
+	if noteW > 0 {
+		header = append(header, of(plain, "note"))
+	}
+	table = append(table, header)
+	for _, r := range rows {
+		mark := r.mark()
+		r.cells[1] = mark.add(plain, clip(r.title, titleW-mark.width()))
+		if noteW > 0 {
+			r.cells = append(r.cells, r.noteCell(noteW))
+		}
+		table = append(table, r.cells)
+	}
+	for i, line := range v.lay(table, boardGap) {
 		if ids {
 			pane, id := "", ""
 			if i > 0 {
@@ -418,35 +678,26 @@ func (v View) Board(w io.Writer, sessions []Session, ids bool) {
 	}
 }
 
-// table prints rows in aligned columns behind an indent.
-func table(w io.Writer, indent string, rows [][]string) {
-	for _, line := range align(rows) {
-		fmt.Fprintln(w, indent+line)
+// mark leads the title of a session whose transcript was read with something
+// missing. The words are in the note cell and on the session view; the mark
+// is what stays when the note has no room.
+func (r boardRow) mark() cell {
+	if r.caveat == "" {
+		return cell{}
 	}
+	return of(problem, "!").add(plain, " ")
 }
 
-func align(rows [][]string) []string {
-	var widths []int
-	for _, row := range rows {
-		for i, cell := range row {
-			if i == len(widths) {
-				widths = append(widths, 0)
-			}
-			widths[i] = max(widths[i], len([]rune(cell)))
-		}
+// noteCell is the caveat and the latest note, cut to n columns.
+func (r boardRow) noteCell(n int) cell {
+	text := clip(r.note, n)
+	if r.caveat == "" {
+		return of(plain, text)
 	}
-	lines := make([]string, 0, len(rows))
-	for _, row := range rows {
-		var b strings.Builder
-		for i, cell := range row {
-			b.WriteString(cell)
-			if i < len(row)-1 {
-				b.WriteString(strings.Repeat(" ", widths[i]-len([]rune(cell))+3))
-			}
-		}
-		lines = append(lines, strings.TrimRight(b.String(), " "))
+	if rest, ok := strings.CutPrefix(text, "["+r.caveat+"]"); ok {
+		return of(problem, "["+r.caveat+"]").add(plain, rest)
 	}
-	return lines
+	return of(problem, text)
 }
 
 // sessionJSON is the machine form of a session. Times are RFC 3339 and

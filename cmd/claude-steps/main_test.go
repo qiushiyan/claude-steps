@@ -12,9 +12,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mattn/go-runewidth"
 
 	"github.com/qiushiyan/claude-steps/internal/fixture"
 	"github.com/qiushiyan/claude-steps/internal/panes"
@@ -68,6 +71,8 @@ type world struct {
 	panes    []panes.Pane
 	panesErr error
 	tmuxPane string
+	env      map[string]string // COLUMNS, NO_COLOR, CLICOLOR_FORCE
+	tty      bool              // stdout is a terminal
 }
 
 func newWorld(t *testing.T) *world {
@@ -119,13 +124,13 @@ func newWorld(t *testing.T) *world {
 func (w *world) run(args ...string) (stdout, stderr string, code int) {
 	w.t.Helper()
 	var out, errb bytes.Buffer
-	a := &app{stdout: &out, stderr: &errb, now: func() time.Time { return w.now },
+	a := &app{stdout: &out, stderr: &errb, tty: w.tty, now: func() time.Time { return w.now },
 		panes: func() ([]panes.Pane, error) { return w.panes, w.panesErr },
 		getenv: func(k string) string {
 			if k == "TMUX_PANE" {
 				return w.tmuxPane
 			}
-			return ""
+			return w.env[k]
 		}}
 	code = a.run(args)
 	return out.String(), errb.String(), code
@@ -162,27 +167,57 @@ func lacks(t *testing.T, text string, unwanted ...string) {
 func TestShow(t *testing.T) {
 	w := newWorld(t)
 	out := w.ok("show", "%1")
+	// What the session is, on two lines and under a rule.
 	contains(t, out,
-		"The calendar walks days once   aaaaaaaa   work:1.1",
-		"/work/app  feat/thing",
-		"PR #7145 opened here  acme/app",
-		"1 compaction, last 2 hours ago",
-		"3 hours ago      /review  codex full review",
-		"3 hours ago        review-r1  dispatched\n",
-		"3 hours ago        review-r1  collected\n",
-		"3 hours ago      commit  the calendar walks days once (review r1)",
-		"2 hours ago        review-r2  collected, envoy said partial",
-		"2 hours ago      compaction (manual)",
-		"15 minutes ago   skill pl-loopy-verify  local spikes",
-		"notes\n  none",
+		"The calendar walks days once   aaaaaaaa   work:1.1\n"+
+			"/work/app  feat/thing   PR #7145 opened here  acme/app   1 compaction, last 2 hours ago\n"+
+			strings.Repeat("─", 72)+"\n",
 	)
-	// The label lines: the latest review event is the second dispatch, and
-	// one commit was made since.
+	// The label lines come first: the latest review event is the second
+	// dispatch, and one commit was made since.
 	contains(t, out,
-		"review    2 hours ago      1 commit since    review-r2 collected 2 hours ago, envoy said partial",
-		"verify    15 minutes ago   0 commits since   skill pl-loopy-verify local spikes",
-		"prompts   12 minutes ago",
+		"review    2 hours ago      1 commit since    review-r2 collected 2 hours ago, envoy said partial\n"+
+			"verify    15 minutes ago   0 commits since   skill pl-loopy-verify local spikes\n"+
+			"prompts   12 minutes ago                     read skills/prompt-engineering/SKILL.md\n",
+		"no collect seen   ·\nnotes             none\n",
 	)
+	// The steps, newest first: what is under a label, each round's dispatch
+	// and collect at its own time, and the commits between as a count.
+	contains(t, out, `
+steps
+  prompts   12m   read skills/prompt-engineering/SKILL.md
+  verify    15m   skill pl-loopy-verify  local spikes
+                  1 commit
+  review    2h    review-r2  collected, envoy said partial
+  review    2h    review-r2  dispatched
+  review    3h    review-r1  collected
+                  1 commit
+  review    3h    review-r1  dispatched
+  review    3h    /review  codex full review
+
+11 rows in the full history (show --all)
+`)
+	lacks(t, out, "compaction (manual)", "commit  ", "history\n")
+
+	// --all prints the whole timeline in the steps' place, and the footer's
+	// count is the rows it holds.
+	all := w.ok("show", "%1", "--all")
+	_, history, found := strings.Cut(all, "\nhistory\n")
+	if rows := strings.Count(history, "\n"); !found || rows != 11 {
+		t.Errorf("want 11 rows of history, got %d:\n%s", rows, all)
+	}
+	contains(t, all,
+		"  prompts   12m   read skills/prompt-engineering/SKILL.md\n",
+		"            2h    PR #7145 opened here  acme/app\n",
+		"            2h    commit  docs: the stories on the local rig\n",
+		"            2h    compaction (manual)\n",
+		"            3h    commit  the calendar walks days once (review r1)\n",
+		"  review    3h    /review  codex full review\n",
+	)
+	lacks(t, all, "steps\n", "in the full history")
+	if head, _, _ := strings.Cut(out, "\nsteps\n"); !strings.HasPrefix(all, head) {
+		t.Errorf("--all changes more than the timeline:\n%s", all)
+	}
 
 	// With no argument, show reads the pane it runs in.
 	w.tmuxPane = "%1"
@@ -216,8 +251,8 @@ func TestCollectIsShownWhenItHappened(t *testing.T) {
 	tr.Write(t, w.projects, "-work-app", id)
 	out := w.ok("show", id)
 	contains(t, out,
-		"3 hours ago        review-r7  dispatched\n",
-		"15 minutes ago     review-r7  collected, envoy said partial\n",
+		"  review   15m   review-r7  collected, envoy said partial\n"+
+			"  review   3h    review-r7  dispatched\n",
 		"3 hours ago   0 commits since   review-r7 collected 15 minutes ago, envoy said partial\n",
 	)
 }
@@ -260,8 +295,15 @@ func TestShowJSON(t *testing.T) {
 	}
 }
 
-// A label's cell is a date, never a judgement. This is the whole grammar.
-var cell = regexp.MustCompile(`^(·|(read )?(now|\d+ (second|minute|hour|day|week|month|year)s? ago)( \+\d+)?|named (now|\d+ (second|minute|hour|day|week|month|year)s? ago))$`)
+// A label's cell is a date, never a judgement. This is the whole grammar,
+// and the grammar of the cell that dates the newest round with no collect.
+const when = `(now|\d+(s|m|h|d|w|mo|y))`
+
+var (
+	cell        = regexp.MustCompile(`^(·|(read )?` + when + `( \+\d+)?|named ` + when + `)$`)
+	uncollected = regexp.MustCompile(`^(·|` + when + `( ×\d+)?)$`)
+	columns     = regexp.MustCompile(` {2,}`)
+)
 
 // Obligations 5, 10 and 12 on the board.
 func TestBoard(t *testing.T) {
@@ -272,23 +314,30 @@ func TestBoard(t *testing.T) {
 	if len(rows) != 6 {
 		t.Fatalf("want a header and five panes (the pane with a malformed id is not a session):\n%s", out)
 	}
-	contains(t, rows[0], "pane", "session", "review", "verify", "prompts", "PR", "compactions", "note")
-	contains(t, rows[1], "work:1.1", "The calendar walks days once", "2 hours ago +1", "15 minutes ago +0", "read 12 minutes ago", "#7145")
-	contains(t, rows[2], "work:1.2", "named 3 hours ago")
+	if got := columns.Split(rows[0], -1); !slices.Equal(got, []string{"pane", "session", "review", "verify", "prompts", "no collect", "PR", "note"}) {
+		t.Errorf("header: %q", got)
+	}
+	contains(t, rows[1], "work:1.1  The calendar walks days once  2h +1   15m +0    read 12m  ·           #7145")
+	contains(t, rows[2], "work:1.2", "named 3h")
 	contains(t, rows[3], "work:2.1", "no transcript", "transcript deleted, the PR was merged")
 	contains(t, rows[4], "work:2.2", "transcript unreadable")
-	contains(t, rows[5], "work:3.1", "[1 line could not be read]")
+	// A transcript read with a line missing is marked before its title, and
+	// says so in words where there is room.
+	contains(t, rows[5], "work:3.1  ! app", "[1 line could not be read]")
 
 	// Every label cell of every row fits the grammar.
 	idRows := strings.Split(strings.TrimRight(w.ok("board", "--ids"), "\n"), "\n")
-	header := regexp.MustCompile(` {3,}`).Split(strings.Split(idRows[0], "\t")[2], -1)
+	header := columns.Split(strings.Split(idRows[0], "\t")[2], -1)
 	for _, i := range []int{1, 2, 5} {
 		fields := strings.Split(idRows[i], "\t")
-		cells := regexp.MustCompile(` {3,}`).Split(fields[2], -1)
+		cells := columns.Split(fields[2], -1)
 		for col := 2; col < 5; col++ {
 			if !cell.MatchString(cells[col]) {
 				t.Errorf("row %d, label %s: cell %q is not a date", i, header[col], cells[col])
 			}
+		}
+		if !uncollected.MatchString(cells[5]) {
+			t.Errorf("row %d: %q is not a date", i, cells[5])
 		}
 	}
 	// --ids: the pane id and the session id lead every row, and are empty on
@@ -302,7 +351,7 @@ func TestBoard(t *testing.T) {
 // are shown as written.
 func TestNoVerdictInTheToolsOwnWords(t *testing.T) {
 	w := newWorld(t)
-	for _, args := range [][]string{{"board"}, {"show", "%1"}, {"show", "%3"}, {"show", "%4"}, {"show", "%5"}} {
+	for _, args := range [][]string{{"board"}, {"show", "%1"}, {"show", "%1", "--all"}, {"show", "%3"}, {"show", "%4"}, {"show", "%5"}} {
 		out := strings.ToLower(w.ok(args...))
 		lacks(t, out, "✓", "✔", "done", "passed", "stale", "fresh", "complete", "succeeded")
 	}
@@ -318,15 +367,16 @@ func TestUnreadTranscriptsSayWhy(t *testing.T) {
 	w.ok("note", "%3", "kept past the transcript")
 
 	missing := w.ok("show", "%3")
-	contains(t, missing, "session cccccccc   cccccccc   work:2.1", "no transcript", "notes\n  now   kept past the transcript")
+	contains(t, missing, "session cccccccc   cccccccc   work:2.1\nno transcript\n", "notes   now   kept past the transcript")
 	unreadable := w.ok("show", "%4")
-	contains(t, unreadable, "transcript unreadable", filepath.Join("-work-app", garbled+".jsonl"), "notes\n  none")
+	contains(t, unreadable, "transcript unreadable", filepath.Join("-work-app", garbled+".jsonl"), "notes   none")
 	for _, out := range []string{missing, unreadable} {
-		lacks(t, out, "no events in the transcript", " ago")
+		lacks(t, out, "no events in the transcript", " ago", "steps", "no collect seen")
 	}
 
+	// What the view may lack is said under the header, before the labels.
 	partial := w.ok("show", "%5")
-	contains(t, partial, "/review", "1 line could not be read")
+	contains(t, partial, "/work/app  feat/thing\n1 line could not be read\n─", "/review")
 
 	// A transcript that was read and holds nothing says so in its own words.
 	fresh := fixture.ID("f0f0f0f0")
@@ -343,7 +393,7 @@ func TestViewSaysWhenTheReaderMayHaveMissedSomething(t *testing.T) {
 	w.panes = []panes.Pane{{ID: "%9", Where: "x:1.1", SessionID: id}}
 	want := "the reader may have missed 1 × commit (claude-steps check)"
 	contains(t, w.ok("show", id), want)
-	contains(t, w.ok("board"), "["+want+"]")
+	contains(t, w.ok("board"), "x:1.1  ! app", "["+want+"]")
 }
 
 func TestRepeatedLinesAreOneLine(t *testing.T) {
@@ -356,11 +406,282 @@ func TestRepeatedLinesAreOneLine(t *testing.T) {
 	tr.Bash(`git commit -m "fix"`, "")
 	tr.Slash("pl-handle-code-review", "7619", "/repo/.claude/skills/pl-handle-code-review")
 	tr.Write(t, w.projects, "p", id)
-	out := w.ok("show", id)
+	out := w.ok("show", id, "--all")
 	if strings.Count(out, "/pl-handle-code-review") != 2 {
 		t.Errorf("want one line for the run of four and one for the fifth:\n%s", out)
 	}
 	contains(t, out, "/pl-handle-code-review  7619  (4 times)")
+
+	// The same among the steps, where the commit between is a count line.
+	tr = fixture.New()
+	for range 3 {
+		tr.Slash("review", "codex", "/home/u/.claude/skills/review")
+	}
+	tr.Bash(`git commit -m "fix"`, "")
+	tr.Slash("review", "codex", "/home/u/.claude/skills/review")
+	tr.Write(t, w.projects, "p", id)
+	contains(t, w.ok("show", id), "/review  codex\n                1 commit\n  review   3h   /review  codex  (3 times)\n")
+}
+
+var escape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// Colour is the same text painted: with the escapes removed it is the plain
+// output byte for byte. The popup reads through a pipe, so it asks for colour
+// in the environment, and the ids it acts on stay bare.
+func TestColourIsTheSameTextPainted(t *testing.T) {
+	w := newWorld(t)
+	w.ok("note", "%1", "a note")
+	force := map[string]string{"CLICOLOR_FORCE": "1"}
+	for _, args := range [][]string{{"board"}, {"board", "--ids"}, {"show", "%1"}, {"show", "%1", "--all"}, {"show", "%3"}, {"show", "%4"}, {"show", "%5"}} {
+		w.env = nil
+		bare := w.ok(args...)
+		w.env = force
+		painted := w.ok(args...)
+		if escape.MatchString(bare) || !escape.MatchString(painted) {
+			t.Errorf("%v: colour without being asked, or none when asked:\n%q", args, painted)
+		}
+		if got := escape.ReplaceAllString(painted, ""); got != bare {
+			t.Errorf("%v: the painted text differs from the plain:\n%s\n%s", args, got, bare)
+		}
+	}
+	for _, row := range strings.Split(strings.TrimRight(w.ok("board", "--ids"), "\n"), "\n") {
+		if fields := strings.SplitN(row, "\t", 3); len(fields) != 3 || strings.Contains(fields[0]+fields[1], "\x1b") {
+			t.Errorf("an id field is not bare: %q", row)
+		}
+	}
+
+	// A hue names a label, red marks what could not be read, and a count of
+	// commits is strong only when there are any.
+	contains(t, w.ok("board"),
+		"\x1b[34mreview\x1b[0m", "\x1b[35mverify\x1b[0m", "\x1b[36mprompts\x1b[0m",
+		"2h \x1b[1m+1\x1b[0m", "15m +0", "\x1b[2m·\x1b[0m",
+		"\x1b[31mno transcript\x1b[0m", "\x1b[31m!\x1b[0m app", "\x1b[31m[1 line could not be read]\x1b[0m",
+	)
+	contains(t, w.ok("show", "%1"),
+		"\x1b[34mreview\x1b[0m    2 hours ago      \x1b[1m1 commit since\x1b[0m",
+		"\x1b[35mverify\x1b[0m    15 minutes ago   0 commits since",
+		"  \x1b[34mreview\x1b[0m    3h    /review  codex full review",
+		"  \x1b[2mnote\x1b[0m      now   a note",
+	)
+	contains(t, w.ok("show", "%5"), "\x1b[31m1 line could not be read\x1b[0m")
+
+	// NO_COLOR wins over being asked, and a terminal is painted unasked.
+	w.env = map[string]string{"CLICOLOR_FORCE": "1", "NO_COLOR": "1"}
+	if escape.MatchString(w.ok("board")) {
+		t.Error("NO_COLOR did not turn colour off")
+	}
+	w.env, w.tty = map[string]string{"CLICOLOR_FORCE": "0"}, false
+	if escape.MatchString(w.ok("board")) {
+		t.Error("CLICOLOR_FORCE=0 asked for colour")
+	}
+	w.env, w.tty = nil, true
+	if !escape.MatchString(w.ok("board")) {
+		t.Error("a terminal got no colour")
+	}
+}
+
+// A round dispatched here with no collect in the transcript is listed under
+// the labels, whatever ran after it and whether or not a label lists it. The
+// label's own row would hide it behind a later round.
+func TestRoundsWithNoCollectSeen(t *testing.T) {
+	w := newWorld(t)
+	id := fixture.ID("ababab12")
+	tr := fixture.New()
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.Bash("envoy run spike-r1 --with codex --prompt-file /tmp/s.md", "Command running in background")
+	tr.At(fixture.Start.Add(time.Hour))
+	tr.Bash("envoy run review-r2 --with codex --prompt-file /tmp/r2.md", "Command running in background")
+	tr.Bash("envoy collect review-r2", fmt.Sprintf(collected, "review-r2", "ok"))
+	tr.BashError("envoy run review-r3 --with codex --prompt-file /tmp/r3.md", "envoy: no such voice")
+	tr.Write(t, w.projects, "p", id)
+	w.panes = []panes.Pane{{ID: "%9", Where: "x:1.1", SessionID: id}}
+
+	out := w.ok("show", id)
+	contains(t, out,
+		"review    2 hours ago   0 commits since   review-r2 collected 2 hours ago\n",
+		"no collect seen   spike-r1    3 hours ago\n                  review-r1   3 hours ago\nnotes",
+		// A run that returned an error is not waiting for a collect.
+		"  review   2h   review-r3  run returned an error\n",
+	)
+	// The round no label lists is not a step; the count tells the reader
+	// there is more.
+	lacks(t, out, "spike-r1  dispatched")
+	contains(t, w.ok("show", id, "--all"), "           3h   spike-r1  dispatched\n")
+	contains(t, w.ok("board"), "x:1.1  app      2h +0   ·       ·        3h ×2")
+
+	// The newest three, and how many more.
+	many := fixture.New()
+	for _, name := range []string{"a", "b", "c", "d", "e"} {
+		many.Bash("envoy run job-"+name+" --with codex --prompt-file /tmp/p.md", "Command running in background")
+	}
+	many.Write(t, w.projects, "p", id)
+	contains(t, w.ok("show", id), "no collect seen   job-e    3 hours ago\n                  job-d    3 hours ago\n                  job-c    3 hours ago\n                  2 more\n")
+}
+
+// The commits around the steps are counted wherever they fall: after the
+// newest step, between two, before the oldest, and with no step at all.
+func TestStepsCountTheCommitsAroundThem(t *testing.T) {
+	w := newWorld(t)
+	id := fixture.ID("cdcdcd34")
+	tr := fixture.New()
+	tr.Bash(`git commit -m "one"`, "")
+	tr.SkillCall("pl-loopy-verify", "", "p", false)
+	tr.Bash(`git commit -m "two"`, "")
+	tr.Bash(`git commit -m "three"`, "")
+	tr.Write(t, w.projects, "p", id)
+	contains(t, w.ok("show", id), `
+steps
+                2 commits
+  verify   3h   skill pl-loopy-verify
+                1 commit
+
+4 rows in the full history (show --all)
+`)
+
+	tr = fixture.New()
+	tr.Bash(`git commit -m "one"`, "")
+	tr.Slash("unlabelled", "", "/home/u/.claude/skills/unlabelled")
+	tr.Bash(`git commit -m "two"`, "")
+	tr.Write(t, w.projects, "p", id)
+	contains(t, w.ok("show", id), "\nsteps\n  2 commits\n\n3 rows in the full history (show --all)\n")
+
+	fixture.New().Slash("unlabelled", "", "/home/u/.claude/skills/unlabelled").Write(t, w.projects, "p", id)
+	contains(t, w.ok("show", id), "\nsteps\n  none\n\n1 row in the full history (show --all)\n")
+}
+
+// Labels are not exclusive. A step under two is one row with both names,
+// and the commits beside it are counted once.
+func TestAStepUnderTwoLabels(t *testing.T) {
+	w := newWorld(t)
+	fixture.WriteFile(t, filepath.Join(w.home, ".config", "claude-steps", "config.toml"), []byte(`
+[[label]]
+name = "review"
+skills = ["review"]
+count_commits = true
+
+[[label]]
+name = "docs"
+skills = ["update-docs", "review"]
+color = "yellow"
+`))
+	id := fixture.ID("efefef56")
+	tr := fixture.New()
+	tr.Slash("review", "codex", "/home/u/.claude/skills/review")
+	tr.Bash(`git commit -m "fix"`, "")
+	tr.Prompt("next, the review skill and then update-docs")
+	tr.SkillCall("review", "", "p", true)
+	tr.Write(t, w.projects, "p", id)
+	out := w.ok("show", id)
+	contains(t, out, `
+steps
+  review docs   3h   skill review  failed to load
+  review docs   3h   you: "next, the review skill and then update-docs"
+                     1 commit
+  review docs   3h   /review  codex
+`)
+	if strings.Count(out, "1 commit\n") != 1 {
+		t.Errorf("the commit is counted once:\n%s", out)
+	}
+	w.env = map[string]string{"CLICOLOR_FORCE": "1"}
+	contains(t, w.ok("show", id),
+		"  \x1b[34mreview\x1b[0m \x1b[33mdocs\x1b[0m   3h   \x1b[31mskill review  failed to load\x1b[0m\n",
+		"\x1b[33mdocs\x1b[0m     3 hours ago",
+	)
+}
+
+// With no label configured there are no steps to pick, and the view is the
+// whole timeline.
+func TestNoLabelsShowTheHistory(t *testing.T) {
+	w := newWorld(t)
+	fixture.WriteFile(t, filepath.Join(w.home, ".config", "claude-steps", "config.toml"), nil)
+	out := w.ok("show", "%1")
+	contains(t, out, "\nhistory\n", "commit  docs: the stories on the local rig")
+	lacks(t, out, "steps\n", "in the full history")
+	if got := columns.Split(strings.SplitN(w.ok("board"), "\n", 2)[0], -1); !slices.Equal(got, []string{"pane", "session", "no collect", "PR", "note"}) {
+		t.Errorf("header: %q", got)
+	}
+}
+
+// columnOf is the screen column text starts at in line, counting a CJK
+// character as two.
+func columnOf(t *testing.T, line, text string) int {
+	t.Helper()
+	i := strings.Index(line, text)
+	if i < 0 {
+		t.Fatalf("no %q in %q", text, line)
+	}
+	return screen.StringWidth(line[:i])
+}
+
+var screen = &runewidth.Condition{StrictEmojiNeutral: true}
+
+// When the popup says how wide it is, the title and the note give way and
+// the label cells never do. A note with no room is left to the session view,
+// and the mark of a transcript read with something missing stays.
+func TestTheBoardFitsTheWidth(t *testing.T) {
+	w := newWorld(t)
+	w.ok("note", "%1", "a long note that runs well past the edge of a narrow popup window")
+	wide := fixture.ID("abcd9876")
+	fixture.New().Title("日历只走一遍，其余的都是多余").Slash("review", "", "/home/u/.claude/skills/review").Write(t, w.projects, "p", wide)
+	w.panes = append(w.panes, panes.Pane{ID: "%7", Where: "work:4.1", SessionID: wide})
+
+	rows := func(cols int) []string {
+		t.Helper()
+		w.env = map[string]string{"COLUMNS": fmt.Sprint(cols)}
+		out := strings.Split(strings.TrimRight(w.ok("board"), "\n"), "\n")
+		for _, row := range out {
+			if screen.StringWidth(row) > cols {
+				t.Errorf("at %d columns a row takes %d:\n%s", cols, screen.StringWidth(row), row)
+			}
+		}
+		contains(t, out[1], "2h +1   15m +0    read 12m  ·           #7145")
+		contains(t, out[2], "named 3h")
+		contains(t, out[5], "! app")
+		// A title in CJK takes two columns a character, and the columns
+		// after it still line up.
+		if at, want := columnOf(t, out[6], "3h +0"), columnOf(t, out[0], "review"); at != want {
+			t.Errorf("at %d columns the label cell of a CJK title starts at %d, the header at %d:\n%s\n%s", cols, at, want, out[0], out[6])
+		}
+		return out
+	}
+	// Room for everything: the note is cut only at its own limit.
+	out := rows(140)
+	contains(t, out[0], "note")
+	contains(t, out[1], "The calendar walks days once  ", "a long note that runs well past the edge of a n…")
+	// The title gives way first, then the note.
+	out = rows(110)
+	contains(t, out[1], "The calendar walks…  ", "a long note that runs well pas…")
+	out = rows(90)
+	contains(t, out[1], "The calendar w…  ", "a long note tha…")
+	// No room for a note: the column goes, and the mark stays.
+	out = rows(70)
+	lacks(t, out[0], "note")
+	lacks(t, out[1], "a long note")
+	contains(t, out[1], "The calenda…  ")
+}
+
+// A session view cuts each event to the width it is given, so a row is one
+// line of the preview, and puts the header on two lines when one is too long.
+func TestTheSessionViewFitsTheWidth(t *testing.T) {
+	w := newWorld(t)
+	id := fixture.ID("9a9a9a9a")
+	tr := fixture.New().Title("A session with a long request")
+	tr.Slash("review", strings.Repeat("codex full review of the whole branch ", 6), "/home/u/.claude/skills/review")
+	tr.Bash("gh pr create --fill", "https://github.com/acme/app/pull/12")
+	tr.PRLink("acme/app", 12)
+	tr.Write(t, w.projects, "p", id)
+	w.env = map[string]string{"COLUMNS": "90"}
+	for _, args := range [][]string{{"show", id}, {"show", id, "--all"}} {
+		out := w.ok(args...)
+		for _, row := range strings.Split(out, "\n") {
+			if screen.StringWidth(row) > 90 {
+				t.Errorf("%v: a row takes %d columns:\n%s", args, screen.StringWidth(row), row)
+			}
+		}
+		contains(t, out, strings.Repeat("─", 90)+"\n", "…\n")
+	}
+	w.env = map[string]string{"COLUMNS": "40"}
+	contains(t, w.ok("show", id), "/work/app  feat/thing\nPR #12 opened here  acme/app\n"+strings.Repeat("─", 40)+"\n")
 }
 
 // Notes: obligations 11 and 12, and the session a note lands in.
@@ -371,9 +692,11 @@ func TestNote(t *testing.T) {
 	w.ok("note", "aaaaaaaa", "second note")
 
 	out := w.ok("show", worked)
+	// Newest first under the labels, and again among the steps at the time
+	// each was written.
 	contains(t, out,
-		"20 minutes ago   note: skip verify, the spike covered it",
-		"notes\n  20 minutes ago   skip verify, the spike covered it\n  now              second note",
+		"notes             now              second note\n                  20 minutes ago   skip verify, the spike covered it\n",
+		"steps\n  note      now   second note\n  note      20m   skip verify, the spike covered it\n",
 	)
 	contains(t, w.ok("board"), "(2) second note")
 
@@ -390,7 +713,7 @@ func TestNote(t *testing.T) {
 	// The note text is opaque after "--", even when it reads like an option
 	// (review r1).
 	w.ok("note", worked, "--", "--help")
-	contains(t, w.ok("show", worked), "note: --help")
+	contains(t, w.ok("show", worked), "notes             now              --help\n")
 
 	// A damaged line is reported and the notes around it are shown.
 	os.WriteFile(file, append(data, []byte("{broken\n")...), 0o644)
@@ -455,10 +778,9 @@ func TestFailedRunAndUnknownTimeAreSaid(t *testing.T) {
 	tr.Raw(fixture.Row{"type": "pr-link", "prNumber": 4, "prUrl": "https://github.com/acme/app/pull/4", "prRepository": "acme/app"})
 	tr.BashError("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Exit code 2\nenvoy: no such voice")
 	tr.Write(t, w.projects, "-work-app", id)
-	contains(t, w.ok("show", id),
-		"at an unknown time   PR #4 linked  acme/app",
-		"review-r1  run returned an error",
-	)
+	contains(t, w.ok("show", id), "  review   3h   review-r1  run returned an error\n")
+	// A row with no time is the oldest the history can place.
+	contains(t, w.ok("show", id, "--all"), "  review   3h   review-r1  run returned an error\n           ?    PR #4 linked  acme/app\n")
 }
 
 // Notes another machine kept for the session are merged from stdin.
@@ -471,7 +793,7 @@ func TestImportNotes(t *testing.T) {
 	if code := a.run([]string{"import-notes", worked}); code != 0 || out.String() != "1 notes added\n" {
 		t.Fatalf("exit %d, %q, %q", code, out.String(), errb.String())
 	}
-	contains(t, w.ok("show", worked), "notes\n  3 hours ago   from the laptop\n  now           written here")
+	contains(t, w.ok("show", worked), "notes             now           written here\n                  3 hours ago   from the laptop\n")
 	if _, _, code := w.run("import-notes", "aaaaaaaa"); code == 0 {
 		t.Error("import-notes takes a full session id")
 	}

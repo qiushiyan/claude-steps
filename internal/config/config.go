@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -23,7 +24,14 @@ type Label struct {
 	// CountCommits adds the number of commits made since the label's latest
 	// event to its cell.
 	CountCommits bool `toml:"count_commits"`
+	// Color is the hue the label's name is drawn in, one of Colors. Empty
+	// takes the next of the default cycle.
+	Color string `toml:"color"`
 }
+
+// Colors are the hues a label may name. Red is left out: it marks what the
+// transcript reports as an error and what the reader could not read.
+var Colors = []string{"blue", "magenta", "cyan", "green", "yellow"}
 
 // Snippet is a TabType snippet reduced to what a prompt is matched against.
 type Snippet struct {
@@ -71,6 +79,9 @@ func Load() (Config, error) {
 	for i, l := range cfg.Labels {
 		if l.Name == "" {
 			return Config{}, fmt.Errorf("%s: label %d has no name", path, i+1)
+		}
+		if l.Color != "" && !slices.Contains(Colors, l.Color) {
+			return Config{}, fmt.Errorf("%s: label %s: color %q is not one of %s", path, l.Name, l.Color, strings.Join(Colors, ", "))
 		}
 	}
 	cfg.ProjectsDir = expand(cfg.ProjectsDir, home)

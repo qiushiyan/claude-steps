@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,23 +20,37 @@ import (
 
 const usage = `claude-steps — what has happened in a Claude Code session, read from its transcript
 
-  claude-steps show [<pane>|<session>] [--json]   one session: its timeline and notes
-  claude-steps board [--json] [--ids]             every Claude pane in tmux, one row each
-  claude-steps note <pane>|<session> <text…>      append a note to a session
-  claude-steps check                              test the reader against recent transcripts
-  claude-steps import-notes <session id>          merge notes from another machine, read on stdin
+  claude-steps show [<pane>|<session>] [--all] [--json]   one session: its labels, notes and steps
+  claude-steps board [--json] [--ids]                     every Claude pane in tmux, one row each
+  claude-steps note <pane>|<session> <text…>              append a note to a session
+  claude-steps check                                      test the reader against recent transcripts
+  claude-steps import-notes <session id>                  merge notes from another machine, read on stdin
 
 <pane> is a tmux pane id such as %12; show defaults to the pane it runs in.
 <session> is a session id, or its first eight or more characters.
 
-The timeline lists dated events: skills run, snippets pasted, envoy rounds and
-their collects, commits, pull requests, compactions, and your notes. It states
-what the transcript holds. It does not say a check is finished or still covers
-the code; a prompt that only names a skill is shown as your words.
+show prints the newest first: each label's latest event and the commits made
+since, the rounds dispatched here with no collect seen, your notes, and the
+steps. A step is an event under a label, or a note; the commits between two
+steps are one count line. show --all prints the whole timeline in their place:
+skills run, snippets pasted, envoy rounds and their collects, commits, pull
+requests, compactions, and your notes.
 
-A label's cell is the time of its latest event; "+2" counts the commits made
-since that event started, "read" means a skill's file was read and not loaded,
-"named" means a prompt named the skill and nothing more was seen.
+A view states what the transcript holds. It does not say a check is finished
+or still covers the code; a prompt that only names a skill is shown as your
+words. "no collect seen" means this transcript holds none: the round may be
+running, collected from another session, or given up on.
+
+On the board a label's cell is the time of its latest event ("11m", "2d");
+"+2" counts the commits made since that event started, "read" means a skill's
+file was read and not loaded, "named" means a prompt named the skill and
+nothing more was seen. "no collect" holds the time of the newest round with no
+collect seen, and "×2" when there are two. "!" before a title says the
+transcript was read with something missing; the session view says what.
+
+A hue names a label and red marks an error or something unread; no colour
+grades a date. Output is coloured on a terminal, or anywhere with
+CLICOLOR_FORCE=1, and never with NO_COLOR set. COLUMNS is the width to fit.
 
 Notes belong to a session id. Resuming keeps the id, so the notes stay. /clear
 starts a new id with an empty timeline and no notes. A forked session also has
@@ -71,6 +86,7 @@ type app struct {
 	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
+	tty    bool // stdout is a terminal
 	now    func() time.Time
 	panes  func() ([]panes.Pane, error)
 	getenv func(string) string
@@ -78,7 +94,23 @@ type app struct {
 
 func main() {
 	a := &app{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, now: time.Now, panes: panes.List, getenv: os.Getenv}
+	if info, err := os.Stdout.Stat(); err == nil {
+		a.tty = info.Mode()&os.ModeCharDevice != 0
+	}
 	os.Exit(a.run(os.Args[1:]))
+}
+
+// view is how this invocation prints. A popup reads the output through a
+// pipe, so it asks for colour and gives the width in the environment.
+func (a *app) view(cfg config.Config) render.View {
+	home, _ := os.UserHomeDir()
+	v := render.View{Now: a.now(), Home: home, Labels: cfg.Labels}
+	if n, err := strconv.Atoi(a.getenv("COLUMNS")); err == nil && n > 0 {
+		v.Width = n
+	}
+	force := a.getenv("CLICOLOR_FORCE")
+	v.Color = a.getenv("NO_COLOR") == "" && (a.tty || force != "" && force != "0")
+	return v
 }
 
 func (a *app) run(args []string) int {
@@ -118,8 +150,7 @@ func (a *app) run(args []string) int {
 		fmt.Fprintf(a.stderr, "claude-steps: %v\n", err)
 		return 1
 	}
-	home, _ := os.UserHomeDir()
-	s := session{cfg: cfg, loader: record.NewLoader(cfg), view: render.View{Now: a.now(), Home: home}}
+	s := session{cfg: cfg, loader: record.NewLoader(cfg), view: a.view(cfg)}
 	if err := run(s, rest); err != nil {
 		fmt.Fprintf(a.stderr, "claude-steps: %v\n", err)
 		return 1
@@ -234,7 +265,7 @@ func (a *app) target(s session, token string) (string, *panes.Pane, error) {
 }
 
 func (a *app) show(s session, args []string) error {
-	set, rest, err := flags(args, "--json")
+	set, rest, err := flags(args, "--json", "--all")
 	if err != nil {
 		return err
 	}
@@ -257,7 +288,7 @@ func (a *app) show(s session, args []string) error {
 	if set["--json"] {
 		return render.ShowJSON(a.stdout, view)
 	}
-	s.view.Show(a.stdout, view)
+	s.view.Show(a.stdout, view, set["--all"])
 	return nil
 }
 

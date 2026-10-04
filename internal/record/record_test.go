@@ -587,6 +587,53 @@ func TestReadStatus(t *testing.T) {
 	}
 }
 
+// Labels are not exclusive: one event can be under several, and the names
+// come back in configuration order. A failed call is still under its label.
+func TestAnEventCanBeUnderSeveralLabels(t *testing.T) {
+	overlapping := []config.Label{
+		{Name: "review", Skills: []string{"review"}, Jobs: []string{"review-"}},
+		{Name: "docs", Skills: []string{"update-docs", "review"}, Snippets: []string{"handoff"}},
+		{Name: "rounds", Jobs: []string{"re", "consult-"}},
+	}
+	for _, c := range []struct {
+		e    Event
+		want string
+	}{
+		{Event{Kind: Skill, Name: "plugin:review"}, "review docs"},
+		{Event{Kind: Skill, Name: "review", Failed: true}, "review docs"},
+		{Event{Kind: Read, Name: "update-docs"}, "docs"},
+		{Event{Kind: Snippet, Name: "handoff"}, "docs"},
+		{Event{Kind: Round, Name: "review-r1"}, "review rounds"},
+		{Event{Kind: Round, Name: "spike-r1"}, ""},
+		{Event{Kind: Mention, Names: []string{"update-docs"}}, "docs"},
+		{Event{Kind: Mention, Names: []string{"review", "update-docs"}}, "review docs"},
+		{Event{Kind: Commit, Text: "review"}, ""},
+	} {
+		if got := strings.Join(LabelsOf(overlapping, c.e), " "); got != c.want {
+			t.Errorf("%s %s %v: under %q, want %q", c.e.Kind, c.e.Name, c.e.Names, got, c.want)
+		}
+	}
+}
+
+// A round is uncollected when this session dispatched it and the transcript
+// holds no collect for it. A run that returned an error is not waiting.
+func TestRoundsWithNoCollect(t *testing.T) {
+	tr := fixture.New()
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.Bash("envoy run review-r2 --with codex --prompt-file /tmp/r2.md", "Command running in background")
+	tr.Bash("envoy collect review-r2", "job: /j/review-r2\nstatus: ok\n\n--- result.md ---\nfindings")
+	tr.BashError("envoy run review-r3 --with codex --prompt-file /tmp/r3.md", "envoy: no such voice")
+	tr.Bash("envoy collect review-r0", "job: /j/review-r0\nstatus: ok\n\n--- result.md ---\nfindings")
+	tr.Bash("envoy run spike-r1 --with codex --prompt-file /tmp/s.md", "Command running in background")
+	var names []string
+	for _, e := range load(t, tr).Uncollected() {
+		names = append(names, e.Name)
+	}
+	if got := strings.Join(names, " "); got != "review-r1 spike-r1" {
+		t.Errorf("uncollected: %q", got)
+	}
+}
+
 // Obligation 18.
 func TestMentions(t *testing.T) {
 	tr := fixture.New()
