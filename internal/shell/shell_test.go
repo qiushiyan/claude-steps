@@ -2,6 +2,7 @@ package shell
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -144,6 +145,32 @@ func TestDirectoryFollowsScope(t *testing.T) {
 	for _, tc := range cases {
 		if got := dirs(tc.src); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%q: got %q, want %q", tc.src, got, tc.want)
+		}
+	}
+}
+
+// A subshell and a command substitution keep what they assign and define to
+// themselves. A branch decided at run time holds its assignment inside it;
+// after it either value may hold, so the variable reads as its source text.
+func TestAssignmentsFollowScope(t *testing.T) {
+	for src, want := range map[string]string{
+		`JOB=old; (JOB=new); envoy run "$JOB"`:                                   "envoy run old",
+		`JOB=old; x=$(JOB=new; echo x); envoy run "$JOB"`:                        "envoy run old",
+		`JOB=old; JOB=new | cat; envoy run "$JOB"`:                               "envoy run old",
+		`(f() { envoy run inner; }); f`:                                          "f",
+		`f() { envoy run inner; }; (f)`:                                          "envoy run inner",
+		`JOB=old; if test -f x; then JOB=new; fi; envoy run "$JOB"`:              "envoy run $JOB",
+		`JOB=old; if test -f x; then JOB=new; envoy run "$JOB"; fi`:              "envoy run new",
+		`JOB=old; if test -f x; then JOB=a; else envoy run "$JOB"; fi`:           "envoy run old",
+		`JOB=old; test -f x || JOB=new; envoy run "$JOB"`:                        "envoy run $JOB",
+		`JOB=old; for v in a b; do N=$JOB; envoy collect "$N"; done`:             "envoy collect old",
+		`JOB=old; for v in a b; do JOB=x; done; envoy run "$JOB"`:                "envoy run $JOB",
+		`JOB=old; case $1 in a) JOB=new;; esac; envoy run "$JOB"`:                "envoy run $JOB",
+		`JOB=old; if test -f x; then OTHER=1; fi; test -f y && envoy run "$JOB"`: "envoy run old",
+	} {
+		all := argvs(t, src)
+		if got := strings.Join(all[len(all)-1], " "); got != want {
+			t.Errorf("%s\n  last command: %q, want %q", src, got, want)
 		}
 	}
 }

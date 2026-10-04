@@ -13,9 +13,11 @@
 //     $JOB") reads as that value, as one word: the Bash tool runs zsh here,
 //     which does not split an unquoted variable, so a variable holding a
 //     whole command does not run it;
-//   - `cd` moves the commands after it in the same scope, and a subshell, a
-//     pipeline member, a command substitution or a background job is a scope
-//     of its own;
+//   - `cd`, an assignment and a function definition hold for the commands
+//     after them in the same scope, and a subshell, a pipeline member, a
+//     command substitution or a background job is a scope of its own;
+//   - a variable assigned on a branch decided at run time holds inside the
+//     branch, and reads as its source text after it;
 //   - a command that runs only on a branch decided at run time is marked
 //     Guarded.
 //
@@ -24,6 +26,7 @@
 package shell
 
 import (
+	"maps"
 	"path"
 	"strings"
 
@@ -95,8 +98,8 @@ func Split(src, dir string) ([]Command, error) {
 			return nil, err
 		}
 	}
-	w := &walker{src: src, funcs: map[string]*syntax.Stmt{}, vars: map[string]string{}}
-	w.stmts(file.Stmts, &scope{dir: dir}, input{})
+	w := &walker{src: src}
+	w.stmts(file.Stmts, &scope{dir: dir, vars: map[string]string{}, funcs: map[string]*syntax.Stmt{}}, input{})
 	return w.out, nil
 }
 
@@ -106,19 +109,21 @@ const maxCallDepth = 4
 type walker struct {
 	src   string
 	out   []Command
-	funcs map[string]*syntax.Stmt
-	vars  map[string]string
 	depth int
 	guard int // how many guarded branches enclose the statement walked
 }
 
+// scope is what a shell holds that a subshell gets a copy of: where it is,
+// the variables the text has assigned, and the functions it has defined. A
+// variable missing from vars has a value the text does not give.
 type scope struct {
-	dir string
+	dir   string
+	vars  map[string]string
+	funcs map[string]*syntax.Stmt
 }
 
 func (s *scope) fork() *scope {
-	c := *s
-	return &c
+	return &scope{dir: s.dir, vars: maps.Clone(s.vars), funcs: maps.Clone(s.funcs)}
 }
 
 // input is the standard input a statement inherits from a function call.
@@ -155,10 +160,10 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 		case r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc:
 			in = input{set: true}
 			if r.Hdoc != nil {
-				in.body = w.text(r.Hdoc, heredoc)
+				in.body = w.text(sc, r.Hdoc, heredoc)
 			}
 		case r.Op == syntax.WordHdoc && r.Word != nil:
-			in = input{w.text(r.Word, unquoted), true}
+			in = input{w.text(sc, r.Word, unquoted), true}
 		}
 	}
 	switch c := s.Cmd.(type) {
@@ -171,7 +176,7 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 			w.stmt(c.Y, sc.fork(), in)
 		case syntax.OrStmt:
 			w.stmt(c.X, sc, in)
-			w.guarded(func() { w.stmt(c.Y, sc, in) })
+			w.guarded(sc, func(sc *scope) { w.stmt(c.Y, sc, in) })
 		default:
 			w.stmt(c.X, sc, in)
 			w.stmt(c.Y, sc, in)
@@ -183,19 +188,20 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 	case *syntax.IfClause:
 		// The first condition always runs; every other part is a branch.
 		w.stmts(c.Cond, sc, in)
-		w.guarded(func() {
-			w.stmts(c.Then, sc, in)
-			for clause := c.Else; clause != nil; clause = clause.Else {
+		branches := []func(*scope){func(sc *scope) { w.stmts(c.Then, sc, in) }}
+		for clause := c.Else; clause != nil; clause = clause.Else {
+			branches = append(branches, func(sc *scope) {
 				w.stmts(clause.Cond, sc, in)
 				w.stmts(clause.Then, sc, in)
-			}
-		})
+			})
+		}
+		w.guarded(sc, branches...)
 	case *syntax.WhileClause:
 		w.stmts(c.Cond, sc, in)
-		w.guarded(func() { w.stmts(c.Do, sc, in) })
+		w.guarded(sc, func(sc *scope) { w.stmts(c.Do, sc, in) })
 	case *syntax.ForClause:
 		w.substitutions(c.Loop, sc)
-		w.guarded(func() { w.stmts(c.Do, sc, in) })
+		w.guarded(sc, func(sc *scope) { w.stmts(c.Do, sc, in) })
 	case *syntax.TestClause:
 		w.substitutions(c.X, sc)
 	case *syntax.ArithmCmd:
@@ -206,11 +212,11 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 		}
 	case *syntax.CaseClause:
 		w.substitutions(c.Word, sc)
-		w.guarded(func() {
-			for _, item := range c.Items {
-				w.stmts(item.Stmts, sc, in)
-			}
-		})
+		var branches []func(*scope)
+		for _, item := range c.Items {
+			branches = append(branches, func(sc *scope) { w.stmts(item.Stmts, sc, in) })
+		}
+		w.guarded(sc, branches...)
 	case *syntax.TimeClause:
 		w.stmt(c.Stmt, sc, in)
 	case *syntax.CoprocClause:
@@ -218,10 +224,10 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 	case *syntax.FuncDecl:
 		body, rest := funcBody(c.Body)
 		if c.Name != nil {
-			w.funcs[c.Name.Value] = body
+			sc.funcs[c.Name.Value] = body
 		}
 		for _, n := range c.Names {
-			w.funcs[n.Value] = body
+			sc.funcs[n.Value] = body
 		}
 		w.stmts(rest, sc, in)
 	case *syntax.DeclClause:
@@ -230,13 +236,29 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 				w.substitutions(a.Value, sc)
 			}
 		}
-		w.assign(c.Args)
+		w.assign(sc, c.Args)
 	}
 }
 
-func (w *walker) guarded(walk func()) {
+// guarded walks the branches of a choice made at run time: the arms of an if
+// or a case, a loop's body, the right of an ||. Each starts from the
+// variables set before the choice, and what it assigns holds inside it.
+// After the choice the shell may hold any branch's value or the earlier one,
+// so a variable a branch changed has a value the text does not give. A `cd`
+// in a branch still moves what follows, as it always has.
+func (w *walker) guarded(sc *scope, branches ...func(*scope)) {
+	before := maps.Clone(sc.vars)
 	w.guard++
-	walk()
+	for _, walk := range branches {
+		branch := &scope{dir: sc.dir, vars: maps.Clone(before), funcs: sc.funcs}
+		walk(branch)
+		sc.dir = branch.dir
+		for name, value := range before {
+			if now, ok := branch.vars[name]; !ok || now != value {
+				delete(sc.vars, name)
+			}
+		}
+	}
 	w.guard--
 }
 
@@ -265,23 +287,23 @@ func (w *walker) call(c *syntax.CallExpr, sc *scope, in input) {
 		w.substitutions(word, sc)
 	}
 	if len(c.Args) == 0 {
-		w.assign(c.Assigns)
+		w.assign(sc, c.Assigns)
 		return
 	}
 
 	words := make([]string, 0, len(c.Assigns)+len(c.Args))
 	for _, a := range c.Assigns {
 		if a.Name != nil && a.Value != nil {
-			words = append(words, a.Name.Value+"="+w.text(a.Value, unquoted))
+			words = append(words, a.Name.Value+"="+w.text(sc, a.Value, unquoted))
 		}
 	}
 	first := len(words)
 	for _, word := range c.Args {
-		words = append(words, w.text(word, unquoted))
+		words = append(words, w.text(sc, word, unquoted))
 	}
 	name := words[first]
 
-	if body, ok := w.funcs[name]; ok && w.depth < maxCallDepth {
+	if body, ok := sc.funcs[name]; ok && w.depth < maxCallDepth {
 		w.depth++
 		w.stmt(body, sc, in)
 		w.depth--
@@ -303,19 +325,19 @@ func (w *walker) call(c *syntax.CallExpr, sc *scope, in input) {
 
 // assign records variables whose values the text sets. The caller has
 // already walked the values' command substitutions.
-func (w *walker) assign(list []*syntax.Assign) {
+func (w *walker) assign(sc *scope, list []*syntax.Assign) {
 	for _, a := range list {
 		if a.Name == nil || a.Array != nil || a.Index != nil {
 			continue
 		}
 		value := ""
 		if a.Value != nil {
-			value = w.text(a.Value, unquoted)
+			value = w.text(sc, a.Value, unquoted)
 		}
 		if a.Append {
-			value = w.vars[a.Name.Value] + value
+			value = sc.vars[a.Name.Value] + value
 		}
-		w.vars[a.Name.Value] = value
+		sc.vars[a.Name.Value] = value
 	}
 }
 
@@ -359,15 +381,15 @@ const (
 
 // text reads a word as the shell would see it, keeping the source text of
 // anything that needs the shell to run.
-func (w *walker) text(word *syntax.Word, q quoting) string {
+func (w *walker) text(sc *scope, word *syntax.Word, q quoting) string {
 	var b strings.Builder
 	for _, part := range word.Parts {
-		w.part(&b, part, q)
+		w.part(sc, &b, part, q)
 	}
 	return b.String()
 }
 
-func (w *walker) part(b *strings.Builder, part syntax.WordPart, q quoting) {
+func (w *walker) part(sc *scope, b *strings.Builder, part syntax.WordPart, q quoting) {
 	switch p := part.(type) {
 	case *syntax.Lit:
 		b.WriteString(unescape(p.Value, q))
@@ -379,16 +401,16 @@ func (w *walker) part(b *strings.Builder, part syntax.WordPart, q quoting) {
 		b.WriteString(p.Value)
 	case *syntax.DblQuoted:
 		for _, inner := range p.Parts {
-			w.part(b, inner, doubleQuoted)
+			w.part(sc, b, inner, doubleQuoted)
 		}
 	case *syntax.ParamExp:
-		if v, ok := w.vars[plainParam(p)]; ok {
+		if v, ok := sc.vars[plainParam(p)]; ok {
 			b.WriteString(v)
 			return
 		}
 		b.WriteString(w.source(p))
 	case *syntax.CmdSubst:
-		if body, ok := w.catHeredoc(p); ok {
+		if body, ok := w.catHeredoc(sc, p); ok {
 			b.WriteString(body)
 			return
 		}
@@ -400,7 +422,7 @@ func (w *walker) part(b *strings.Builder, part syntax.WordPart, q quoting) {
 
 // catHeredoc reads `$(cat <<EOF … EOF)`, the form a commit message is passed
 // in, as the here-document's body.
-func (w *walker) catHeredoc(cs *syntax.CmdSubst) (string, bool) {
+func (w *walker) catHeredoc(sc *scope, cs *syntax.CmdSubst) (string, bool) {
 	if len(cs.Stmts) != 1 {
 		return "", false
 	}
@@ -411,7 +433,7 @@ func (w *walker) catHeredoc(cs *syntax.CmdSubst) (string, bool) {
 	}
 	for _, r := range s.Redirs {
 		if (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) && r.Hdoc != nil {
-			return w.text(r.Hdoc, heredoc), true
+			return w.text(sc, r.Hdoc, heredoc), true
 		}
 	}
 	return "", false
