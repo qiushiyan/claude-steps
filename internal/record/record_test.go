@@ -634,6 +634,58 @@ func TestRoundsWithNoCollect(t *testing.T) {
 	}
 }
 
+// A name dispatched again before any collect is one round with two
+// dispatches: the collect is of the later one, and the earlier is not waiting.
+func TestANameDispatchedAgainIsNotWaiting(t *testing.T) {
+	tr := fixture.New()
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "ok"))
+	// A name used again after its collect is a new round, and the old one stands.
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	rec := load(t, tr)
+	var got []string
+	for _, e := range rec.Events {
+		got = append(got, fmt.Sprintf("%t/%t", e.Redispatched, e.CollectedAt != nil))
+	}
+	if strings.Join(got, " ") != "true/false false/true false/false" {
+		t.Errorf("redispatched/collected per round: %v", got)
+	}
+	if out := rec.Uncollected(); len(out) != 1 || !out[0].At.After(*rec.Events[1].CollectedAt) {
+		t.Errorf("uncollected: %+v", out)
+	}
+}
+
+// A collect whose job the command text does not give is named by the job
+// lines envoy printed: a loop's variable stands for each job it collected.
+// With no job line the round cannot be shown, and the signal says so.
+func TestCollectNamedByWhatEnvoyPrinted(t *testing.T) {
+	tr := fixture.New()
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.Bash("envoy run review-r2 --with codex --prompt-file /tmp/r2.md", "Command running in background")
+	tr.Bash(`for j in review-r1 review-r2; do envoy collect "$j" 2>&1 | head -3; done`,
+		"job: /j/app-1/review-r1\nstatus: ok\nduration: 6m\njob: /j/app-1/review-r2+2\nstatus: ok\nduration: 9m")
+	tr.Bash(`envoy collect "$(sed -n 1p /tmp/coords)"`, fmt.Sprintf(collected, "consult-r1", "partial"))
+	rec := load(t, tr)
+	want(t, rec,
+		"round | review-r1 | ok | collected | dispatched",
+		"round | review-r2 | ok | collected | dispatched",
+		"round | consult-r1 | partial | collected",
+	)
+	if s := signal(rec, "envoy round"); s.Missed != 0 {
+		t.Errorf("signal: %+v", s)
+	}
+
+	hidden := fixture.New()
+	hidden.Bash(`envoy collect $(sed -n 1p /tmp/coords) | sed -n '/result.md/,$p'`, "--- result.md ---\nfindings")
+	hidden.Bash(`envoy run "$NAME" --with codex --prompt-file /tmp/r1.md`, "Command running in background")
+	rec = load(t, hidden)
+	want(t, rec)
+	if s := signal(rec, "envoy round"); s.Missed != 2 {
+		t.Errorf("signal: %+v", s)
+	}
+}
+
 // Obligation 18.
 func TestMentions(t *testing.T) {
 	tr := fixture.New()
@@ -645,6 +697,7 @@ func TestMentions(t *testing.T) {
 	tr.Prompt("Review the implementation against the spec, obligation   by obligation, and report back. Use pl-loopy-verify after.")
 	tr.SlashOnly("review", "codex") // typed, and no expansion was seen
 	tr.Prompt("thanks")
+	tr.Prompt(`<pasted_content id="4463"> then run pl-loopy-verify </pasted_content> on it`) // the tag is Claude Code's
 	want(t, load(t, tr),
 		"mention | pl-loopy-verify | run pl-loopy-verify with local spikes to re-prove the behavi…",
 		"mention | review | did /review cover the worker?",
@@ -652,6 +705,7 @@ func TestMentions(t *testing.T) {
 		"skill | slash | pl-loopy-verify | local spikes",
 		"snippet | review-implementation",
 		"mention | review | /review codex",
+		"mention | pl-loopy-verify | then run pl-loopy-verify on it",
 	)
 }
 

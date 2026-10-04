@@ -78,13 +78,16 @@ var (
 	commandArgs = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
 	// "status: ok", "status: partial — 1 of 2 …": the word envoy opens with.
 	statusLine = regexp.MustCompile(`(?m)^status:[ \t]*([A-Za-z][\w-]*)`)
-	jobLine    = regexp.MustCompile(`(?m)^job:[ \t]*\S`)
+	jobLine    = regexp.MustCompile(`(?m)^job:[ \t]*(\S+)`)
 	// "[main 1a2b3c4] subject", the line git prints for a commit it made.
 	gitSummary = regexp.MustCompile(`(?m)^\[[^\]\s]+( \([^)]*\))? [0-9a-f]{7,40}\] `)
 	pullURL    = regexp.MustCompile(`https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)`)
 	jobReuse   = regexp.MustCompile(`\+\d+$`)
 	skillFile  = regexp.MustCompile(`(?:^|/)skills/([^/]+)/SKILL\.md$`)
 	envoyCall  = regexp.MustCompile(`\benvoy\s+(run|collect)\b`)
+	// Claude Code wraps text the user pasted in this tag. It is the harness's
+	// mark, not the user's words.
+	pastedTag = regexp.MustCompile(`</?pasted_content\b[^>]*>`)
 )
 
 // mention matches a prompt that names a skill without running it.
@@ -118,6 +121,7 @@ type bashCall struct {
 	commits        []commitCommand
 	runs           []int    // indexes of the round events this call dispatched
 	collects       []string // job arguments of `envoy collect`
+	unnamed        int      // `envoy collect` calls whose job the text does not give
 	createsPR      bool
 	probes         int // `envoy collect --status-only` calls
 	mentionsCommit bool
@@ -367,6 +371,20 @@ func (d *decoder) bashCommand(at time.Time, command string, background bool) *ba
 			call.commits = append(call.commits, commit)
 		}
 		if job, ok := envoyJob(argv, "run"); ok {
+			if !named(job) {
+				// A dispatch under a name the text does not give is a round
+				// the reader cannot show.
+				d.sig.round.Second++
+				d.sig.round.Missed++
+				continue
+			}
+			// A name dispatched again before any collect: the collect that
+			// follows is of this dispatch.
+			if prev, ok := d.rounds[job]; ok {
+				if e := &d.rec.Events[prev]; e.Dispatched && e.CollectedAt == nil {
+					e.Redispatched = true
+				}
+			}
 			idx := d.add(Event{At: at, Kind: Round, Name: job, Dispatched: true})
 			d.rounds[job] = idx
 			call.runs = append(call.runs, idx)
@@ -375,9 +393,12 @@ func (d *decoder) bashCommand(at time.Time, command string, background bool) *ba
 		// `collect --status-only` asks whether the job is still running; it
 		// delivers no result, so it is not a collect.
 		if job, ok := envoyJob(argv, "collect"); ok {
-			if slices.Contains(argv, "--status-only") {
+			switch {
+			case slices.Contains(argv, "--status-only"):
 				call.probes++
-			} else {
+			case !named(job):
+				call.unnamed++
+			default:
 				call.collects = append(call.collects, job)
 			}
 			d.sig.round.Primary++
@@ -502,7 +523,8 @@ func (d *decoder) prompt(at time.Time, text string) {
 		}
 	}
 	if len(names) > 0 {
-		d.add(Event{At: at, Kind: Mention, Names: names, Text: clip(strings.Join(strings.Fields(text), " "), openingWords)})
+		words := strings.Fields(pastedTag.ReplaceAllString(text, " "))
+		d.add(Event{At: at, Kind: Mention, Names: names, Text: clip(strings.Join(words, " "), openingWords)})
 	}
 }
 
@@ -556,6 +578,19 @@ func (d *decoder) result(at time.Time, b block) {
 		outcome = m[1]
 	} else if b.IsError {
 		outcome = "error"
+	}
+	// A collect whose job the text does not give (a loop's variable, a command
+	// substitution) is named by the job lines envoy printed. With none, it is
+	// a round the reader cannot show.
+	if call.unnamed > 0 {
+		printed := jobLine.FindAllStringSubmatch(text, -1)
+		for _, m := range printed {
+			call.collects = append(call.collects, m[1])
+		}
+		if len(printed) == 0 {
+			d.sig.round.Second++
+			d.sig.round.Missed++
+		}
 	}
 	for _, job := range call.collects {
 		d.collect(job, call.at, at, outcome)
@@ -667,7 +702,7 @@ var SignalNotes = map[string]string{
 	"skill, typed":      "a slash command followed by its expansion / an expansion row with no tool call behind it",
 	"skill, model call": "a Skill tool call / an expansion row that names a tool call",
 	"human prompt":      "a prompt row with origin human / a row whose source is typed or queued",
-	"envoy round":       "an envoy run or collect in command position / a result of an envoy call holding its job and status lines",
+	"envoy round":       "an envoy run or collect in command position / a result of an envoy call holding its job and status lines, or a call whose job neither its text nor its result names",
 	"commit":            "a git commit in command position / a result holding git's commit summary line",
 	"pull request":      "a pull-request link row / a URL returned by gh pr create",
 	"compaction":        "a compaction boundary / a compaction summary row",
@@ -787,6 +822,13 @@ func shortCluster(arg string, last byte) bool {
 var envoyValueFlags = map[string]bool{
 	"--with": true, "--prompt-file": true, "--timeout-min": true, "--cwd": true,
 	"--baseline": true, "--max-budget-usd": true, "--base": true,
+}
+
+// named reports whether a job argument is a name the text gives.
+// internal/shell keeps the source text of a part it cannot read without
+// running the shell: a variable set at run time, a command substitution.
+func named(job string) bool {
+	return !strings.ContainsAny(job, "$`")
 }
 
 // envoyJob returns the job argument of `envoy run` or `envoy collect`.

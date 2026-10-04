@@ -66,6 +66,10 @@ type Event struct {
 	// then the dispatch; otherwise it is the first collect.
 	Dispatched  bool       `json:"dispatched,omitempty"`
 	CollectedAt *time.Time `json:"collected_at,omitempty"`
+	// Redispatched: this session ran envoy under the name again with no
+	// collect seen in between. envoy collects a name as its latest dispatch,
+	// so no collect of this one can follow.
+	Redispatched bool `json:"redispatched,omitempty"`
 	// Outcome is the first word of the collect's status line, as envoy
 	// printed it, or "error" when the collect call itself failed.
 	Outcome string `json:"outcome,omitempty"`
@@ -164,11 +168,13 @@ func (r Record) Compactions() []Event { return r.of(Compaction) }
 
 // Uncollected returns the rounds this session dispatched for which the
 // transcript holds no collect, oldest first. It cannot tell a round still
-// running from one collected in another session or given up on.
+// running from one collected in another session or given up on. A dispatch
+// the session replaced under the same name is not one: the later dispatch is
+// the round.
 func (r Record) Uncollected() []Event {
 	var out []Event
 	for _, e := range r.Events {
-		if e.Kind == Round && e.Dispatched && !e.Failed && e.CollectedAt == nil {
+		if e.Kind == Round && e.Dispatched && !e.Failed && !e.Redispatched && e.CollectedAt == nil {
 			out = append(out, e)
 		}
 	}

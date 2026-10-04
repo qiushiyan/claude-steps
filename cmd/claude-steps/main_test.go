@@ -170,7 +170,7 @@ func TestShow(t *testing.T) {
 	// What the session is, on two lines and under a rule.
 	contains(t, out,
 		"The calendar walks days once   aaaaaaaa   work:1.1\n"+
-			"/work/app  feat/thing   PR #7145 opened here  acme/app   1 compaction, last 2 hours ago\n"+
+			"/work/app  feat/thing   1 compaction, last 2 hours ago   PR #7145 opened here  https://github.com/acme/app/pull/7145\n"+
 			strings.Repeat("─", 72)+"\n",
 	)
 	// The label lines come first: the latest review event is the second
@@ -181,23 +181,21 @@ func TestShow(t *testing.T) {
 			"prompts   12 minutes ago                     read skills/prompt-engineering/SKILL.md\n",
 		"no collect seen   ·\nnotes             none\n",
 	)
-	// The steps, newest first: what is under a label, each round's dispatch
-	// and collect at its own time, and the commits between as a count.
+	// The steps, newest first: what is under a label, a round as one line at
+	// its dispatch with the skill run before it, and the commits between as a
+	// count.
 	contains(t, out, `
 steps
   prompts   12m   read skills/prompt-engineering/SKILL.md
   verify    15m   skill pl-loopy-verify  local spikes
                   1 commit
-  review    2h    review-r2  collected, envoy said partial
-  review    2h    review-r2  dispatched
-  review    3h    review-r1  collected
+  review    2h    review-r2  envoy said partial
                   1 commit
-  review    3h    review-r1  dispatched
-  review    3h    /review  codex full review
+  review    3h    review-r1  /review  codex full review
 
 11 rows in the full history (show --all)
 `)
-	lacks(t, out, "compaction (manual)", "commit  ", "history\n")
+	lacks(t, out, "compaction (manual)", "commit  ", "history\n", "dispatched", "  collected")
 
 	// --all prints the whole timeline in the steps' place, and the footer's
 	// count is the rows it holds.
@@ -208,6 +206,7 @@ steps
 	}
 	contains(t, all,
 		"  prompts   12m   read skills/prompt-engineering/SKILL.md\n",
+		"  review    2h    review-r2  collected, envoy said partial\n  review    2h    review-r2  dispatched\n",
 		"            2h    PR #7145 opened here  acme/app\n",
 		"            2h    commit  docs: the stories on the local rig\n",
 		"            2h    compaction (manual)\n",
@@ -238,10 +237,10 @@ steps
 	contains(t, w.ok("show", "aaaaaaaa"), "The calendar walks days once   aaaaaaaa\n")
 }
 
-// A round collected long after its dispatch shows each at its own time;
-// the label still dates the round from the dispatch, the code the reviewer
-// read.
-func TestCollectIsShownWhenItHappened(t *testing.T) {
+// A round collected long after its dispatch is one step, dated at the
+// dispatch as its label is: the code the reviewer read. The label's row and
+// the full history say when the collect happened.
+func TestARoundIsOneStepAtItsDispatch(t *testing.T) {
 	w := newWorld(t)
 	id := fixture.ID("ffffffff")
 	tr := fixture.New()
@@ -249,12 +248,73 @@ func TestCollectIsShownWhenItHappened(t *testing.T) {
 	tr.At(w.now.Add(-16 * time.Minute)) // the result row is a minute after the call
 	tr.Bash("envoy collect review-r7", fmt.Sprintf(collected, "review-r7", "partial"))
 	tr.Write(t, w.projects, "-work-app", id)
-	out := w.ok("show", id)
-	contains(t, out,
-		"  review   15m   review-r7  collected, envoy said partial\n"+
-			"  review   3h    review-r7  dispatched\n",
+	contains(t, w.ok("show", id),
+		"\nsteps\n  review   3h   review-r7  envoy said partial\n\n",
 		"3 hours ago   0 commits since   review-r7 collected 15 minutes ago, envoy said partial\n",
 	)
+	contains(t, w.ok("show", id, "--all"),
+		"  review   15m   review-r7  collected, envoy said partial\n"+
+			"  review   3h    review-r7  dispatched\n",
+	)
+}
+
+// Under a label that lists rounds a step is a round. The latest skill run
+// before a round is on the round's line; a run no round took keeps a line of
+// its own, and a round that followed another has nothing to carry.
+func TestARoundCarriesTheSkillRunBeforeIt(t *testing.T) {
+	w := newWorld(t)
+	id := fixture.ID("abab5656")
+	tr := fixture.New()
+	tr.Slash("review", "goal", "/home/u/.claude/skills/review")
+	tr.Slash("review", "codex full", "/home/u/.claude/skills/review")
+	tr.Bash(`git commit -m "before the round"`, "")
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "ok"))
+	tr.Bash(`git commit -m "fix (review r1)"`, "")
+	tr.Bash("envoy run review-r2 --with codex --prompt-file /tmp/r2.md", "Command running in background")
+	tr.SkillCall("pl-loopy-verify", "spikes", "p", false)
+	tr.Bash("envoy collect /home/u/.local/state/envoy/jobs/app-1/review-r0", fmt.Sprintf(collected, "review-r0", "ok"))
+	tr.Write(t, w.projects, "p", id)
+	out := w.ok("show", id)
+	contains(t, out, `
+steps
+  review   3h   review-r0  no dispatch seen
+  verify   3h   skill pl-loopy-verify  spikes
+  review   3h   review-r2  no collect seen
+                1 commit
+  review   3h   review-r1  /review  codex full
+                1 commit
+  review   3h   /review  goal
+
+`)
+	// The history keeps every line the steps folded.
+	all := w.ok("show", id, "--all")
+	contains(t, all, "review-r1  collected\n", "review-r1  dispatched\n", "/review  codex full\n", "/review  goal\n")
+	lacks(t, all, "no dispatch seen")
+}
+
+// A name dispatched again before any collect is one round: envoy collects a
+// name as its latest dispatch, so the earlier one is not waiting for a collect.
+func TestANameDispatchedAgainIsOneRound(t *testing.T) {
+	w := newWorld(t)
+	id := fixture.ID("abab7878")
+	tr := fixture.New()
+	tr.Bash("envoy run review-r4 --with codex --prompt-file /tmp/r4.md", "Command running in background")
+	tr.Bash("envoy run review-r4 --with codex --prompt-file /tmp/r4.md", "Command running in background")
+	tr.Bash("envoy collect review-r4", fmt.Sprintf(collected, "review-r4", "ok"))
+	tr.Bash("envoy run review-r5 --with codex --prompt-file /tmp/r5.md", "Command running in background")
+	tr.Bash("envoy run review-r5 --with codex --prompt-file /tmp/r5.md", "Command running in background")
+	tr.Write(t, w.projects, "p", id)
+	w.panes = []panes.Pane{{ID: "%9", Where: "x:1.1", SessionID: id}}
+	out := w.ok("show", id)
+	contains(t, out,
+		"no collect seen   review-r5   3 hours ago\nnotes",
+		"\nsteps\n  review   3h   review-r5  dispatched 2 times, no collect seen\n  review   3h   review-r4  dispatched 2 times\n\n",
+	)
+	contains(t, w.ok("show", id, "--all"), "review-r4  dispatched  (2 times)\n")
+	if cells := columns.Split(strings.Split(w.ok("board"), "\n")[1], -1); cells[5] != "3h" {
+		t.Errorf("the board counts a name dispatched again once: %q", cells)
+	}
 }
 
 // Obligation 17: --json carries timestamps and nothing relative.
@@ -460,7 +520,7 @@ func TestColourIsTheSameTextPainted(t *testing.T) {
 	contains(t, w.ok("show", "%1"),
 		"\x1b[34mreview\x1b[0m    2 hours ago      \x1b[1m1 commit since\x1b[0m",
 		"\x1b[35mverify\x1b[0m    15 minutes ago   0 commits since",
-		"  \x1b[34mreview\x1b[0m    3h    /review  codex full review",
+		"  \x1b[34mreview\x1b[0m    3h    review-r1  /review  codex full review",
 		"  \x1b[2mnote\x1b[0m      now   a note",
 	)
 	contains(t, w.ok("show", "%5"), "\x1b[31m1 line could not be read\x1b[0m")
@@ -501,7 +561,7 @@ func TestRoundsWithNoCollectSeen(t *testing.T) {
 		"review    2 hours ago   0 commits since   review-r2 collected 2 hours ago\n",
 		"no collect seen   spike-r1    3 hours ago\n                  review-r1   3 hours ago\nnotes",
 		// A run that returned an error is not waiting for a collect.
-		"  review   2h   review-r3  run returned an error\n",
+		"  review   2h   review-r3  run returned an error\n  review   2h   review-r2\n  review   3h   review-r1  no collect seen\n",
 	)
 	// The round no label lists is not a step; the count tells the reader
 	// there is more.
@@ -680,8 +740,17 @@ func TestTheSessionViewFitsTheWidth(t *testing.T) {
 		}
 		contains(t, out, strings.Repeat("─", 90)+"\n", "…\n")
 	}
+	// The pull requests take lines of their own once the header does not fit
+	// on one, newest first, and a link is never cut.
 	w.env = map[string]string{"COLUMNS": "40"}
-	contains(t, w.ok("show", id), "/work/app  feat/thing\nPR #12 opened here  acme/app\n"+strings.Repeat("─", 40)+"\n")
+	contains(t, w.ok("show", id), "/work/app  feat/thing\nPR #12 opened here  https://github.com/acme/app/pull/12\n"+strings.Repeat("─", 40)+"\n")
+	tr.Compaction("manual", false, "summary")
+	tr.Raw(fixture.Row{"type": "pr-link", "prNumber": 13, "prUrl": "https://github.com/acme/app/pull/13", "prRepository": "acme/app"})
+	tr.Write(t, w.projects, "p", id)
+	w.env = map[string]string{"COLUMNS": "100"}
+	contains(t, w.ok("show", id), "/work/app  feat/thing   1 compaction, last 3 hours ago\n"+
+		"PR #13 linked  https://github.com/acme/app/pull/13\n"+
+		"PR #12 opened here  https://github.com/acme/app/pull/12\n"+strings.Repeat("─", 100)+"\n")
 }
 
 // Notes: obligations 11 and 12, and the session a note lands in.

@@ -32,14 +32,17 @@ const usage = `claude-steps — what has happened in a Claude Code session, read
 show prints the newest first: each label's latest event and the commits made
 since, the rounds dispatched here with no collect seen, your notes, and the
 steps. A step is an event under a label, or a note; the commits between two
-steps are one count line. show --all prints the whole timeline in their place:
-skills run, snippets pasted, envoy rounds and their collects, commits, pull
-requests, compactions, and your notes.
+steps are one count line. A round is one step, at its dispatch: its name,
+what the transcript holds of it when that is not a run and a collect that
+returned a result, and the latest skill run before it. show --all prints the
+whole timeline in the steps' place: skills run, snippets pasted, envoy rounds
+and their collects, commits, pull requests, compactions, and your notes.
 
 A view states what the transcript holds. It does not say a check is finished
 or still covers the code; a prompt that only names a skill is shown as your
 words. "no collect seen" means this transcript holds none: the round may be
-running, collected from another session, or given up on.
+running, collected from another session, or given up on. A dispatch replaced
+under the same name is counted on the later one ("dispatched 2 times").
 
 On the board a label's cell is the time of its latest event ("11m", "2d");
 "+2" counts the commits made since that event started, "read" means a skill's

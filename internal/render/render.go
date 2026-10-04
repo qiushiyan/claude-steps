@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -143,7 +144,85 @@ type line struct {
 	count  bool // a count of commits, which has no time of its own
 }
 
-// lines are a session's timeline, oldest first. A round this session
+// round is a round's one line among the steps: its name, and what the
+// transcript holds of it only where that is something other than one dispatch
+// and a collect that returned a result.
+func round(e record.Event, dispatches int) (string, style) {
+	var said []string
+	if dispatches > 1 {
+		said = append(said, fmt.Sprintf("dispatched %d times", dispatches))
+	}
+	st := plain
+	switch {
+	case e.Failed:
+		said, st = append(said, dispatch(e)), problem
+	case e.CollectedAt == nil:
+		said = append(said, "no collect seen")
+	default:
+		switch {
+		case e.Outcome == "error":
+			said, st = append(said, "collect returned an error"), problem
+		case e.Outcome != "" && e.Outcome != "ok":
+			said = append(said, "envoy said "+e.Outcome)
+		}
+		if !e.Dispatched {
+			said = append(said, "no dispatch seen")
+		}
+	}
+	return join(e.Name, strings.Join(said, ", ")), st
+}
+
+// outline is the timeline the steps are picked from, oldest first. Under a
+// label that lists rounds a step is a round, so a round is one line here,
+// dated at its dispatch. It carries the latest skill run before it under its
+// label, whose own line it replaces, and stands for the dispatches the
+// session replaced under its name. The two are joined by order alone. The
+// full history keeps each of those at its own time.
+func (v View) outline(rec record.Record) []line {
+	var out []line
+	asked := map[string]int{} // label → the line of its latest skill run, until a round takes it
+	taken := map[int]bool{}   // lines a round replaced
+	again := map[string]int{} // round name → its dispatches a later one replaced
+	for _, e := range rec.Timeline() {
+		l := line{at: e.At, kind: e.Kind, labels: record.LabelsOf(v.Labels, e), text: v.describe(e)}
+		if e.Failed {
+			l.style = problem
+		}
+		switch {
+		case e.Kind == record.Round && e.Redispatched && !e.Failed:
+			again[e.Name]++
+			continue
+		case e.Kind == record.Round:
+			l.text, l.style = round(e, again[e.Name]+1)
+			delete(again, e.Name)
+			if !e.Dispatched || e.Failed {
+				break
+			}
+			for _, name := range l.labels {
+				if i, ok := asked[name]; ok {
+					l.text = join(l.text, out[i].text)
+					taken[i] = true
+					maps.DeleteFunc(asked, func(_ string, at int) bool { return at == i })
+					break
+				}
+			}
+		case e.Kind == record.Skill && !e.Failed:
+			for _, name := range l.labels {
+				asked[name] = len(out)
+			}
+		}
+		out = append(out, l)
+	}
+	kept := out[:0]
+	for i, l := range out {
+		if !taken[i] {
+			kept = append(kept, l)
+		}
+	}
+	return kept
+}
+
+// lines are a session's whole timeline, oldest first. A round this session
 // dispatched and collected is two lines, each at its own time.
 func (v View) lines(rec record.Record) []line {
 	var out []line
@@ -274,25 +353,27 @@ func (v View) Show(w io.Writer, s Session, history bool) {
 		head = head.add(plain, "   "+s.Pane.Where)
 	}
 	fmt.Fprintln(w, v.paint(head))
-	var where, facts []string
+	var where, links []string
 	if rec.Cwd != "" {
 		where = append(where, join(v.path(rec.Cwd), rec.Branch))
 	}
 	if readable {
-		for _, pr := range rec.PullRequests() {
-			facts = append(facts, v.describe(pr))
-		}
 		if cs := rec.Compactions(); len(cs) > 0 {
-			facts = append(facts, plural(len(cs), "compaction")+", last "+v.ago(cs[len(cs)-1].At))
+			where = append(where, plural(len(cs), "compaction")+", last "+v.ago(cs[len(cs)-1].At))
+		}
+		for _, pr := range slices.Backward(rec.PullRequests()) {
+			links = append(links, pull(pr))
 		}
 	}
-	// One line when it fits, so the labels start a line higher.
-	switch under := strings.Join(append(where, facts...), "   "); {
-	case v.Width > 0 && width(under) > v.Width && len(where) > 0 && len(facts) > 0:
-		fmt.Fprintln(w, where[0])
-		fmt.Fprintln(w, strings.Join(facts, "   "))
-	case under != "":
-		fmt.Fprintln(w, under)
+	// One line when it fits, so the labels start a line higher. Otherwise the
+	// pull requests start a line of their own: a header with no such line is
+	// a session with no pull request.
+	under := v.fill(slices.Concat(where, links))
+	if len(under) > 1 {
+		under = append(v.fill(where), v.fill(links)...)
+	}
+	for _, l := range under {
+		fmt.Fprintln(w, l)
 	}
 	// What the view may lack is said before anything it holds.
 	lack := v.caveat(rec)
@@ -335,7 +416,7 @@ func (v View) Show(w io.Writer, s Session, history bool) {
 		v.timeline(w, collapse(all))
 	default:
 		fmt.Fprintln(w, v.paint(of(faint, "steps")))
-		st := collapse(steps(all))
+		st := collapse(steps(v.outline(rec)))
 		if len(st) == 0 {
 			fmt.Fprintln(w, "  "+v.paint(of(faint, "none")))
 		}
@@ -343,6 +424,30 @@ func (v View) Show(w io.Writer, s Session, history bool) {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, v.paint(of(faint, plural(len(collapse(all)), "row")+" in the full history (show --all)")))
 	}
+}
+
+// pull is a pull request in the header, newest first there: its number, how
+// the session came by it, and its link.
+func pull(e record.Event) string {
+	how := "linked"
+	if e.OpenedHere {
+		how = "opened here"
+	}
+	return join(fmt.Sprintf("PR #%d %s", e.Number, how), e.URL)
+}
+
+// fill packs the header's items into lines no wider than the view. An item
+// moves to the next line whole, so a link is never cut.
+func (v View) fill(items []string) []string {
+	var lines []string
+	for _, it := range items {
+		if n := len(lines); n > 0 && (v.Width == 0 || width(lines[n-1])+viewGap+width(it) <= v.Width) {
+			lines[n-1] += strings.Repeat(" ", viewGap) + it
+			continue
+		}
+		lines = append(lines, it)
+	}
+	return lines
 }
 
 // trow is a row that ends in free text, which is cut to the room the cells
