@@ -10,7 +10,8 @@ is what the user sees.
   `TestOneReaderAndOneReadOnlyProcess` hold this; a change that needs one of
   them loosened is a design change, not a fix.
 - **Print facts, never verdicts.** No tick, "done", "passed" or "stale" in the
-  tool's own words. A label cell is a date; its grammar is pinned in
+  tool's own words, and no colour that grades a date: a hue names a label or
+  marks something unread. A label cell is a date; its grammar is pinned in
   `TestBoard`.
 - **Transcript row shapes belong to `internal/record/decode.go` alone.** A
   rule added elsewhere is a second reader. After a Claude Code update, run
@@ -18,9 +19,10 @@ is what the user sees.
 - **Tests never read real transcripts or write real notes.** Build rows with
   `internal/fixture` and run under a temporary `HOME`; no private transcript
   is committed, and this repository is public.
-- **Contract changes cross repositories.** `board --ids`, the notes file,
-  `import-notes` and the configuration keys are used by `~/dotfiles`
-  (`tmux-steps.sh`, `claude-tomini`, the `claude-steps` package). `docs/design.md` § Contracts
+- **Contract changes cross repositories.** `board --ids`, `show --all`, the
+  colour and width environment, the notes file, `import-notes` and the
+  configuration keys are used by `~/dotfiles` (`tmux-steps.sh`,
+  `claude-tomini`, the `claude-steps` package). `docs/design.md` § Contracts
   other repositories depend on.
 - Callers run `claude-steps` from PATH. Run `make check` before shipping and
   `make install` after: a source edit alone leaves the popup on the old
