@@ -22,8 +22,8 @@ var labels = []config.Label{
 	{Name: "prompts", Skills: []string{"prompt-engineering"}},
 }
 
-var snippets = []config.Snippet{
-	{Key: "review-implementation", Head: config.Squash("Review the implementation against the spec, obligation by obligation, and report")},
+var snippets = config.Snippets{
+	{Key: "review-implementation", Head: "review the implementation against the spec, obligation by obligation, and report"},
 }
 
 const session = "11111111-1111-4111-8111-111111111111"

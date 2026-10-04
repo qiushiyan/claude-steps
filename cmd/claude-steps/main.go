@@ -93,6 +93,10 @@ type app struct {
 	now    func() time.Time
 	panes  func() ([]panes.Pane, error)
 	getenv func(string) string
+
+	// Set once the configuration is read, before a command runs.
+	loader *record.Loader
+	view   render.View
 }
 
 func main() {
@@ -103,9 +107,9 @@ func main() {
 	os.Exit(a.run(os.Args[1:]))
 }
 
-// view is how this invocation prints. A popup reads the output through a
+// newView is how this invocation prints. A popup reads the output through a
 // pipe, so it asks for colour and gives the width in the environment.
-func (a *app) view(cfg config.Config) render.View {
+func (a *app) newView(cfg config.Config) render.View {
 	home, _ := os.UserHomeDir()
 	v := render.View{Now: a.now(), Home: home, Labels: cfg.Labels}
 	if n, err := strconv.Atoi(a.getenv("COLUMNS")); err == nil && n > 0 {
@@ -127,7 +131,7 @@ func (a *app) run(args []string) int {
 		return 0
 	}
 
-	var run func(session, []string) error
+	var run func([]string) error
 	switch cmd {
 	case "show":
 		run = a.show
@@ -153,8 +157,8 @@ func (a *app) run(args []string) int {
 		fmt.Fprintf(a.stderr, "claude-steps: %v\n", err)
 		return 1
 	}
-	s := session{cfg: cfg, loader: record.NewLoader(cfg), view: a.view(cfg)}
-	if err := run(s, rest); err != nil {
+	a.loader, a.view = record.NewLoader(cfg), a.newView(cfg)
+	if err := run(rest); err != nil {
 		fmt.Fprintf(a.stderr, "claude-steps: %v\n", err)
 		return 1
 	}
@@ -173,19 +177,6 @@ func asksHelp(args []string) bool {
 		}
 	}
 	return false
-}
-
-// session is what one invocation works with.
-type session struct {
-	cfg    config.Config
-	loader *record.Loader
-	view   render.View
-}
-
-// load is the one way a command gets a session's record.
-func (s session) load(id string, pane *panes.Pane) render.Session {
-	rec := s.loader.Load(id)
-	return render.Session{Pane: pane, Record: rec, Labels: record.Summarise(rec.Events, s.cfg.Labels)}
 }
 
 // flags splits arguments into the named switches that are present and the
@@ -231,7 +222,7 @@ func (a *app) livePanes() ([]panes.Pane, error) {
 
 // target turns a pane id or a session id into a session, with its pane when
 // it is live.
-func (a *app) target(s session, token string) (string, *panes.Pane, error) {
+func (a *app) target(token string) (string, *panes.Pane, error) {
 	if strings.HasPrefix(token, "%") {
 		live, err := a.livePanes()
 		if err != nil {
@@ -255,7 +246,7 @@ func (a *app) target(s session, token string) (string, *panes.Pane, error) {
 			}
 		}
 	}
-	id, err := s.loader.Resolve(token)
+	id, err := a.loader.Resolve(token)
 	if err != nil {
 		return "", nil, err
 	}
@@ -267,7 +258,7 @@ func (a *app) target(s session, token string) (string, *panes.Pane, error) {
 	return id, nil, nil
 }
 
-func (a *app) show(s session, args []string) error {
+func (a *app) show(args []string) error {
 	set, rest, err := flags(args, "--json", "--all")
 	if err != nil {
 		return err
@@ -283,19 +274,19 @@ func (a *app) show(s session, args []string) error {
 	default:
 		return errors.New("show takes one pane or session")
 	}
-	id, pane, err := a.target(s, token)
+	id, pane, err := a.target(token)
 	if err != nil {
 		return err
 	}
-	view := s.load(id, pane)
+	session := render.Session{Pane: pane, Record: a.loader.Load(id)}
 	if set["--json"] {
-		return render.ShowJSON(a.stdout, view)
+		return a.view.ShowJSON(a.stdout, session)
 	}
-	s.view.Show(a.stdout, view, set["--all"])
+	a.view.Show(a.stdout, session, set["--all"])
 	return nil
 }
 
-func (a *app) board(s session, args []string) error {
+func (a *app) board(args []string) error {
 	set, rest, err := flags(args, "--json", "--ids")
 	if err != nil {
 		return err
@@ -310,21 +301,21 @@ func (a *app) board(s session, args []string) error {
 	sessions := make([]render.Session, len(live))
 	var wg sync.WaitGroup
 	for i := range live {
-		wg.Go(func() { sessions[i] = s.load(live[i].SessionID, &live[i]) })
+		wg.Go(func() { sessions[i] = render.Session{Pane: &live[i], Record: a.loader.Load(live[i].SessionID)} })
 	}
 	wg.Wait()
 	if set["--json"] {
-		return render.BoardJSON(a.stdout, sessions)
+		return a.view.BoardJSON(a.stdout, sessions)
 	}
 	if len(sessions) == 0 {
 		fmt.Fprintln(a.stderr, "claude-steps: no tmux pane runs a Claude session")
 		return nil
 	}
-	s.view.Board(a.stdout, sessions, set["--ids"])
+	a.view.Board(a.stdout, sessions, set["--ids"])
 	return nil
 }
 
-func (a *app) note(s session, args []string) error {
+func (a *app) note(args []string) error {
 	_, rest, err := flags(args)
 	if err != nil {
 		return err
@@ -336,11 +327,11 @@ func (a *app) note(s session, args []string) error {
 	if text == "" {
 		return errors.New("the note is empty")
 	}
-	id, _, err := a.target(s, rest[0])
+	id, _, err := a.target(rest[0])
 	if err != nil {
 		return err
 	}
-	if err := s.loader.AddNote(id, a.now(), text); err != nil {
+	if err := a.loader.AddNote(id, a.now(), text); err != nil {
 		return fmt.Errorf("the note was not saved: %w", err)
 	}
 	return nil
@@ -348,7 +339,7 @@ func (a *app) note(s session, args []string) error {
 
 // importNotes merges notes another machine kept for a session. The
 // transcript need not be here yet: claude-tomini copies both.
-func (a *app) importNotes(s session, args []string) error {
+func (a *app) importNotes(args []string) error {
 	_, rest, err := flags(args)
 	if err != nil {
 		return err
@@ -356,7 +347,7 @@ func (a *app) importNotes(s session, args []string) error {
 	if len(rest) != 1 || !record.IsSessionID(rest[0]) {
 		return errors.New("import-notes takes one full session id, and the notes on stdin")
 	}
-	added, bad, err := s.loader.ImportNotes(rest[0], a.stdin)
+	added, bad, err := a.loader.ImportNotes(rest[0], a.stdin)
 	if err != nil {
 		return fmt.Errorf("the notes were not merged: %w", err)
 	}
@@ -369,7 +360,7 @@ func (a *app) importNotes(s session, args []string) error {
 
 // check reads every transcript changed in the last week through the same
 // loader the views use, and reports each fact counted two ways.
-func (a *app) check(s session, args []string) error {
+func (a *app) check(args []string) error {
 	_, rest, err := flags(args)
 	if err != nil {
 		return err
@@ -377,14 +368,14 @@ func (a *app) check(s session, args []string) error {
 	if len(rest) > 0 {
 		return errors.New("check takes no arguments")
 	}
-	ids := s.loader.Recent(s.view.Now.Add(-checkWindow))
+	ids := a.loader.Recent(a.now().Add(-checkWindow))
 	records := make([]record.Record, len(ids))
 	var wg sync.WaitGroup
 	gate := make(chan struct{}, 4)
 	for i, id := range ids {
 		wg.Go(func() {
 			gate <- struct{}{}
-			rec := s.loader.Load(id)
+			rec := a.loader.Load(id)
 			rec.Events, rec.Notes = nil, nil
 			records[i] = rec
 			<-gate
@@ -412,7 +403,7 @@ func (a *app) check(s session, args []string) error {
 		for _, sig := range rec.Signals {
 			t := totals[sig.Fact]
 			if t == nil {
-				t = &record.Signal{Fact: sig.Fact}
+				t = &record.Signal{Fact: sig.Fact, Note: sig.Note}
 				totals[sig.Fact] = t
 				facts = append(facts, sig.Fact)
 			}
@@ -453,7 +444,7 @@ func (a *app) check(s session, args []string) error {
 	}
 	for _, fact := range facts {
 		t := totals[fact]
-		fmt.Fprintf(w, "%-18s %8d %8d %8d   %s\n", fact, t.Primary, t.Second, t.Missed, record.SignalNotes[fact])
+		fmt.Fprintf(w, "%-18s %8d %8d %8d   %s\n", fact, t.Primary, t.Second, t.Missed, t.Note)
 		if t.Missed > 0 {
 			fmt.Fprintf(w, "%-18s missed in %s\n", "", strings.Join(missedIn[fact], " "))
 		}

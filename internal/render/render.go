@@ -22,12 +22,12 @@ import (
 	"github.com/qiushiyan/claude-steps/internal/record"
 )
 
-// Session is one session as a view shows it: the record, the pane it runs in
-// when it is live, and its state under each configured label.
+// Session is one session as a view shows it: the record, and the pane it runs
+// in when it is live. Its state under each label is the view's to work out,
+// from the labels it was given.
 type Session struct {
 	Pane   *panes.Pane
 	Record record.Record
-	Labels []record.LabelState
 }
 
 type View struct {
@@ -97,11 +97,7 @@ func (v View) describe(e record.Event) string {
 		}
 		return join(head, e.Text)
 	case record.PR:
-		how := "linked"
-		if e.OpenedHere {
-			how = "opened here"
-		}
-		return join(fmt.Sprintf("PR #%d %s", e.Number, how), e.Repo)
+		return join(linked(e), e.Repo)
 	case record.Compaction:
 		if e.Trigger != "" {
 			return "compaction (" + e.Trigger + ")"
@@ -144,6 +140,16 @@ type line struct {
 	count  bool // a count of commits, which has no time of its own
 }
 
+// lineOf is the line an event starts as: its time, its labels and its words,
+// drawn as a problem when the transcript says the call failed.
+func (v View) lineOf(e record.Event) line {
+	l := line{at: e.At, kind: e.Kind, labels: record.LabelsOf(v.Labels, e), text: v.describe(e)}
+	if e.Failed {
+		l.style = problem
+	}
+	return l
+}
+
 // round is a round's one line among the steps: its name, and what the
 // transcript holds of it only where that is something other than one dispatch
 // and a collect that returned a result.
@@ -184,10 +190,7 @@ func (v View) outline(rec record.Record) []line {
 	taken := map[int]bool{}   // lines a round replaced
 	again := map[string]int{} // round name → its dispatches a later one replaced
 	for _, e := range rec.Timeline() {
-		l := line{at: e.At, kind: e.Kind, labels: record.LabelsOf(v.Labels, e), text: v.describe(e)}
-		if e.Failed {
-			l.style = problem
-		}
+		l := v.lineOf(e)
 		switch {
 		case e.Kind == record.Round && e.Redispatched && !e.Failed:
 			again[e.Name]++
@@ -227,10 +230,7 @@ func (v View) outline(rec record.Record) []line {
 func (v View) lines(rec record.Record) []line {
 	var out []line
 	for _, e := range rec.Timeline() {
-		l := line{at: e.At, kind: e.Kind, labels: record.LabelsOf(v.Labels, e), text: v.describe(e)}
-		if e.Failed {
-			l.style = problem
-		}
+		l := v.lineOf(e)
 		if e.Kind == record.Round && e.CollectedAt != nil {
 			got := l
 			got.at, got.style = *e.CollectedAt, plain
@@ -362,7 +362,7 @@ func (v View) Show(w io.Writer, s Session, history bool) {
 			where = append(where, plural(len(cs), "compaction")+", last "+v.ago(cs[len(cs)-1].At))
 		}
 		for _, pr := range slices.Backward(rec.PullRequests()) {
-			links = append(links, pull(pr))
+			links = append(links, join(linked(pr), pr.URL))
 		}
 	}
 	// One line when it fits, so the labels start a line higher. Otherwise the
@@ -391,9 +391,9 @@ func (v View) Show(w io.Writer, s Session, history bool) {
 
 	var summary []trow
 	if readable {
-		if len(s.Labels) > 0 {
-			rows := make([]trow, 0, len(s.Labels))
-			for _, l := range s.Labels {
+		if states := record.Summarise(rec.Events, v.Labels); len(states) > 0 {
+			rows := make([]trow, 0, len(states))
+			for _, l := range states {
 				rows = append(rows, v.labelRow(l))
 			}
 			v.table(w, "", rows, labelWidth)
@@ -426,14 +426,13 @@ func (v View) Show(w io.Writer, s Session, history bool) {
 	}
 }
 
-// pull is a pull request in the header, newest first there: its number, how
-// the session came by it, and its link.
-func pull(e record.Event) string {
-	how := "linked"
+// linked names a pull request and says how the session came by it. The
+// header follows it with the link, the history with the repository.
+func linked(e record.Event) string {
 	if e.OpenedHere {
-		how = "opened here"
+		return fmt.Sprintf("PR #%d opened here", e.Number)
 	}
-	return join(fmt.Sprintf("PR #%d %s", e.Number, how), e.URL)
+	return fmt.Sprintf("PR #%d linked", e.Number)
 }
 
 // fill packs the header's items into lines no wider than the view. An item
@@ -667,8 +666,8 @@ func (v View) notes(rec record.Record, all bool) []trow {
 type boardRow struct {
 	cells  []cell // every column but the note; cells[1] waits for the title
 	title  string
-	caveat string
-	note   string
+	caveat string // what the view may lack, said before the note
+	note   string // the latest note
 }
 
 // Board prints one row per session. With ids, every line starts with the
@@ -703,7 +702,7 @@ func (v View) Board(w io.Writer, sessions []Session, ids bool) {
 		if rec.Status == record.Missing || rec.Status == record.Unreadable {
 			r.cells = append(r.cells, cell{spans: []span{{unread(rec), problem}}, wide: true})
 		} else {
-			for _, l := range s.Labels {
+			for _, l := range record.Summarise(rec.Events, v.Labels) {
 				r.cells = append(r.cells, v.labelCell(l))
 			}
 			prs := of(faint, nothing)
@@ -715,15 +714,13 @@ func (v View) Board(w io.Writer, sessions []Session, ids bool) {
 				prs = of(plain, strings.Join(numbers, " "))
 			}
 			r.cells = append(r.cells, v.uncollectedCell(rec), prs)
-			if r.caveat = v.caveat(rec); r.caveat != "" {
-				r.note = strings.TrimSpace("[" + r.caveat + "] " + r.note)
-			}
+			r.caveat = v.caveat(rec)
 		}
 		for len(r.cells) < len(header) {
 			r.cells = append(r.cells, cell{})
 		}
 		titleW = max(titleW, min(width(r.title)+r.mark().width(), titleWidth))
-		noteW = max(noteW, width(r.note))
+		noteW = max(noteW, r.noted().width())
 		rows[i] = r
 		fixed = append(fixed, r.cells)
 	}
@@ -760,10 +757,9 @@ func (v View) Board(w io.Writer, sessions []Session, ids bool) {
 	}
 	table = append(table, header)
 	for _, r := range rows {
-		mark := r.mark()
-		r.cells[1] = mark.add(plain, clip(r.title, titleW-mark.width()))
+		r.cells[1] = r.mark().add(plain, oneLine(r.title)).cut(titleW)
 		if noteW > 0 {
-			r.cells = append(r.cells, r.noteCell(noteW))
+			r.cells = append(r.cells, r.noted().cut(noteW))
 		}
 		table = append(table, r.cells)
 	}
@@ -793,16 +789,17 @@ func (r boardRow) mark() cell {
 	return of(problem, "!").add(plain, " ")
 }
 
-// noteCell is the caveat and the latest note, cut to n columns.
-func (r boardRow) noteCell(n int) cell {
-	text := clip(r.note, n)
+// noted is the row's note cell before it is cut to the room there is: what
+// the view may lack, then the latest note.
+func (r boardRow) noted() cell {
 	if r.caveat == "" {
-		return of(plain, text)
+		return of(plain, r.note)
 	}
-	if rest, ok := strings.CutPrefix(text, "["+r.caveat+"]"); ok {
-		return of(problem, "["+r.caveat+"]").add(plain, rest)
+	c := of(problem, "["+r.caveat+"]")
+	if r.note != "" {
+		c = c.add(plain, " "+r.note)
 	}
-	return of(problem, text)
+	return c
 }
 
 // sessionJSON is the machine form of a session. Times are RFC 3339 and
@@ -816,8 +813,9 @@ type sessionJSON struct {
 	Labels       []record.LabelState `json:"labels"`
 }
 
-func toJSON(s Session) sessionJSON {
-	out := sessionJSON{Record: s.Record, PullRequests: s.Record.PullRequests(), Compactions: s.Record.Compactions(), Labels: s.Labels}
+func (v View) toJSON(s Session) sessionJSON {
+	rec := s.Record
+	out := sessionJSON{Record: rec, PullRequests: rec.PullRequests(), Compactions: rec.Compactions(), Labels: record.Summarise(rec.Events, v.Labels)}
 	if s.Pane != nil {
 		out.Pane, out.Where = s.Pane.ID, s.Pane.Where
 	}
@@ -827,20 +825,17 @@ func toJSON(s Session) sessionJSON {
 	if out.Compactions == nil {
 		out.Compactions = []record.Event{}
 	}
-	if out.Labels == nil {
-		out.Labels = []record.LabelState{}
-	}
 	return out
 }
 
-func ShowJSON(w io.Writer, s Session) error {
-	return encode(w, toJSON(s))
+func (v View) ShowJSON(w io.Writer, s Session) error {
+	return encode(w, v.toJSON(s))
 }
 
-func BoardJSON(w io.Writer, sessions []Session) error {
+func (v View) BoardJSON(w io.Writer, sessions []Session) error {
 	out := make([]sessionJSON, 0, len(sessions))
 	for _, s := range sessions {
-		out = append(out, toJSON(s))
+		out = append(out, v.toJSON(s))
 	}
 	return encode(w, out)
 }

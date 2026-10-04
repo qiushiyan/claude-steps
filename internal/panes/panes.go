@@ -31,12 +31,12 @@ func List() ([]Pane, error) {
 		}
 		return nil, fmt.Errorf("cannot run tmux: %w", err)
 	}
-	return Parse(string(out)), nil
+	return parse(string(out)), nil
 }
 
-// Parse reads list-panes output in the package's format, keeping the panes
+// parse reads list-panes output in the package's format, keeping the panes
 // that carry a session id.
-func Parse(out string) []Pane {
+func parse(out string) []Pane {
 	var panes []Pane
 	for line := range strings.Lines(out) {
 		f := strings.Split(strings.TrimRight(line, "\r\n"), "\t")

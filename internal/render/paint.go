@@ -75,6 +75,37 @@ func (c cell) width() int {
 	return n
 }
 
+// cut ends a cell at n columns with "…" when it is wider. The mark takes the
+// style of the span it falls in, so a cut inside a warning stays a warning.
+func (c cell) cut(n int) cell {
+	if c.width() <= n {
+		return c
+	}
+	out := cell{wide: c.wide}
+	room := n - 1 // the mark takes a column
+	for _, s := range c.spans {
+		if room < 0 {
+			break
+		}
+		w := width(s.text)
+		if w <= room {
+			out.spans = append(out.spans, s)
+			room -= w
+			continue
+		}
+		kept, at := "", 0
+		for i, r := range s.text {
+			if at += cells.RuneWidth(r); at > room {
+				kept = s.text[:i]
+				break
+			}
+		}
+		out.spans = append(out.spans, span{strings.TrimRight(kept, " ") + "…", s.style})
+		break
+	}
+	return out
+}
+
 // paint writes a cell with its escapes, or bare when the view has no colour.
 func (v View) paint(c cell) string {
 	var b strings.Builder

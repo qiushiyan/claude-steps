@@ -88,7 +88,9 @@ type Event struct {
 // does. Missed counts second traces with no matching first; above zero it
 // means the format moved under the reader.
 type Signal struct {
-	Fact    string `json:"fact"`
+	Fact string `json:"fact"`
+	// Note says what the two counts are; `check` prints it.
+	Note    string `json:"-"`
 	Primary int    `json:"primary"`
 	Second  int    `json:"second"`
 	Missed  int    `json:"missed"`

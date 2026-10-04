@@ -141,13 +141,12 @@ type prompt struct {
 }
 
 type decoder struct {
-	snippets []config.Snippet
+	snippets config.Snippets
 	mentions []mention
 
 	labelled map[string]bool // the skill names some label lists
 
 	rec        *Record
-	lines      int
 	recognised int // rows that decode and carry a type
 
 	lastAt     time.Time
@@ -165,7 +164,7 @@ type decoder struct {
 	sig struct{ slash, tool, pr, compaction, human, commit, round Signal }
 }
 
-func newDecoder(rec *Record, snippets []config.Snippet, mentions []mention) *decoder {
+func newDecoder(rec *Record, snippets config.Snippets, mentions []mention) *decoder {
 	labelled := map[string]bool{}
 	for _, m := range mentions {
 		labelled[m.name] = true
@@ -198,10 +197,8 @@ func (d *decoder) read(r io.Reader) error {
 			// does not decode yet is neither a line read nor a damaged one.
 			switch {
 			case d.line(line):
-				d.lines++
 				d.recognised++
 			case complete:
-				d.lines++
 				d.rec.UnreadLines++
 			}
 		}
@@ -341,17 +338,6 @@ func (d *decoder) assistant(at time.Time, blocks []block) bool {
 	return ok
 }
 
-// within resolves git's -C argument against where the command runs.
-func within(dir, arg string) string {
-	switch {
-	case arg == "":
-		return dir
-	case path.IsAbs(arg) || strings.HasPrefix(arg, "~") || dir == "":
-		return path.Clean(arg)
-	}
-	return path.Join(dir, arg)
-}
-
 // bashCommand records what a Bash call ran. Round events are added now, at
 // the dispatch; commits wait for the result, which says whether they happened.
 // A call the tool ran in the background returns before anything in it has
@@ -364,7 +350,7 @@ func (d *decoder) bashCommand(at time.Time, command string, background bool) *ba
 	for _, c := range cmds {
 		argv := c.Argv()
 		if commit, ok := commitOf(argv, c); ok {
-			if commit.dir = within(c.Dir, commit.dir); commit.dir == d.cwd {
+			if commit.dir = shell.Resolve(c.Dir, commit.dir); commit.dir == d.cwd {
 				commit.dir = ""
 			}
 			commit.guarded = c.Guarded || background
@@ -505,15 +491,11 @@ func (d *decoder) unexpanded(c *slashCommand) {
 // prompt lifts what a human prompt shows: a pasted snippet, or failing that
 // the labelled skills it names.
 func (d *decoder) prompt(at time.Time, text string) {
-	flat := config.Squash(text)
-	pasted := false
-	for _, s := range d.snippets {
-		if strings.Contains(flat, s.Head) {
-			d.add(Event{At: at, Kind: Snippet, Name: s.Key})
-			pasted = true
-		}
+	pasted := d.snippets.Pasted(text)
+	for _, key := range pasted {
+		d.add(Event{At: at, Kind: Snippet, Name: key})
 	}
-	if pasted {
+	if len(pasted) > 0 {
 		return
 	}
 	var names []string
@@ -547,7 +529,7 @@ func (d *decoder) result(at time.Time, b block) {
 		return
 	}
 	delete(d.bash, b.ToolUseID)
-	text := resultText(b.Content)
+	text, _, _ := content(b.Content)
 
 	// A call that returned an error made no commit, unless git's own summary
 	// line is in the output: the commit succeeded and a later command failed.
@@ -685,32 +667,21 @@ func (d *decoder) finish() {
 	}
 	slices.SortStableFunc(d.rec.Events, func(a, b Event) int { return a.At.Compare(b.At) })
 
-	name := func(s Signal, fact string) Signal { s.Fact = fact; return s }
 	d.rec.Signals = []Signal{
-		name(d.sig.slash, "skill, typed"),
-		name(d.sig.tool, "skill, model call"),
-		name(d.sig.human, "human prompt"),
-		name(d.sig.round, "envoy round"),
-		name(d.sig.commit, "commit"),
-		name(d.sig.pr, "pull request"),
-		name(d.sig.compaction, "compaction"),
+		d.sig.slash.as("skill, typed", "a slash command followed by its expansion / an expansion row with no tool call behind it"),
+		d.sig.tool.as("skill, model call", "a Skill tool call / an expansion row that names a tool call"),
+		d.sig.human.as("human prompt", "a prompt row with origin human / a row whose source is typed or queued"),
+		d.sig.round.as("envoy round", "an envoy run or collect in command position / a result of an envoy call holding its job and status lines, or a call whose job neither its text nor its result names"),
+		d.sig.commit.as("commit", "a git commit in command position / a result holding git's commit summary line"),
+		d.sig.pr.as("pull request", "a pull-request link row / a URL returned by gh pr create"),
+		d.sig.compaction.as("compaction", "a compaction boundary / a compaction summary row"),
 	}
 }
 
-// SignalNotes says, per fact, what the two counts are. `check` prints them.
-var SignalNotes = map[string]string{
-	"skill, typed":      "a slash command followed by its expansion / an expansion row with no tool call behind it",
-	"skill, model call": "a Skill tool call / an expansion row that names a tool call",
-	"human prompt":      "a prompt row with origin human / a row whose source is typed or queued",
-	"envoy round":       "an envoy run or collect in command position / a result of an envoy call holding its job and status lines, or a call whose job neither its text nor its result names",
-	"commit":            "a git commit in command position / a result holding git's commit summary line",
-	"pull request":      "a pull-request link row / a URL returned by gh pr create",
-	"compaction":        "a compaction boundary / a compaction summary row",
-}
-
-func resultText(raw json.RawMessage) string {
-	text, _, _ := content(raw)
-	return text
+// as names a signal's fact and says what its two counts are.
+func (s Signal) as(fact, note string) Signal {
+	s.Fact, s.Note = fact, note
+	return s
 }
 
 func clip(s string, n int) string {
@@ -719,131 +690,4 @@ func clip(s string, n int) string {
 		return s
 	}
 	return strings.TrimRight(string(r[:n]), " ") + "…"
-}
-
-type commitCommand struct {
-	subject string
-	amend   bool
-	dir     string // the argument of git -C
-	guarded bool   // it may not have run although the call succeeded
-}
-
-// Options of git itself that take a separate value, before the subcommand.
-var gitValueFlags = map[string]bool{
-	"-C": true, "-c": true, "--git-dir": true, "--work-tree": true, "--namespace": true, "--config-env": true,
-}
-
-// commitOf reports whether a simple command is `git commit`, and reads the
-// subject from the message when the command carries one.
-func commitOf(argv []string, c shell.Command) (commitCommand, bool) {
-	if len(argv) < 2 || argv[0] != "git" {
-		return commitCommand{}, false
-	}
-	var out commitCommand
-	i := 1
-	for i < len(argv) && strings.HasPrefix(argv[i], "-") {
-		if gitValueFlags[argv[i]] {
-			if argv[i] == "-C" && i+1 < len(argv) {
-				out.dir = argv[i+1]
-			}
-			i++
-		}
-		i++
-	}
-	if i >= len(argv) || argv[i] != "commit" {
-		return commitCommand{}, false
-	}
-	message, have := "", false
-	take := func(m string) {
-		if !have {
-			message, have = m, true
-		}
-	}
-	args := argv[i+1:]
-	for j := 0; j < len(args); j++ {
-		a := args[j]
-		value := func() (string, bool) {
-			if j+1 < len(args) {
-				j++
-				return args[j], true
-			}
-			return "", false
-		}
-		switch {
-		case a == "--":
-			j = len(args)
-		case a == "--dry-run":
-			return commitCommand{}, false
-		case a == "--amend":
-			out.amend = true
-		case a == "--message" || shortCluster(a, 'm'):
-			if v, ok := value(); ok {
-				take(v)
-			}
-		case strings.HasPrefix(a, "--message="):
-			take(strings.TrimPrefix(a, "--message="))
-		case a == "--file" || shortCluster(a, 'F'):
-			if v, ok := value(); ok && v == "-" && c.HasStdin {
-				take(c.Stdin)
-			}
-		case a == "--file=-":
-			if c.HasStdin {
-				take(c.Stdin)
-			}
-		case strings.HasPrefix(a, "-m") && !strings.HasPrefix(a, "--"):
-			take(a[2:])
-		}
-	}
-	for line := range strings.Lines(message) {
-		if s := strings.TrimSpace(line); s != "" {
-			out.subject = clip(s, subjectMax)
-			break
-		}
-	}
-	return out, true
-}
-
-// shortCluster reports whether arg is a run of short options ending in last,
-// as "-am" ends in the option that takes the message.
-func shortCluster(arg string, last byte) bool {
-	if len(arg) < 2 || arg[0] != '-' || arg[len(arg)-1] != last {
-		return false
-	}
-	for i := 1; i < len(arg); i++ {
-		ch := arg[i]
-		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z') {
-			return false
-		}
-	}
-	return true
-}
-
-// Options of `envoy run` that take a separate value.
-var envoyValueFlags = map[string]bool{
-	"--with": true, "--prompt-file": true, "--timeout-min": true, "--cwd": true,
-	"--baseline": true, "--max-budget-usd": true, "--base": true,
-}
-
-// named reports whether a job argument is a name the text gives.
-// internal/shell keeps the source text of a part it cannot read without
-// running the shell: a variable set at run time, a command substitution.
-func named(job string) bool {
-	return !strings.ContainsAny(job, "$`")
-}
-
-// envoyJob returns the job argument of `envoy run` or `envoy collect`.
-func envoyJob(argv []string, sub string) (string, bool) {
-	if len(argv) < 3 || argv[0] != "envoy" || argv[1] != sub {
-		return "", false
-	}
-	for i := 2; i < len(argv); i++ {
-		if strings.HasPrefix(argv[i], "-") {
-			if envoyValueFlags[argv[i]] {
-				i++
-			}
-			continue
-		}
-		return argv[i], true
-	}
-	return "", false
 }

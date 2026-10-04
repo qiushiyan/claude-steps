@@ -11,7 +11,7 @@ func TestParseKeepsPanesWithASession(t *testing.T) {
 		{ID: "%1", Where: "work:1.1", SessionID: "11111111-1111-4111-8111-111111111111"},
 		{ID: "%3", Where: "my notes:2.1", SessionID: "22222222-2222-4222-8222-222222222222"},
 	}
-	if got := Parse(out); !reflect.DeepEqual(got, want) {
+	if got := parse(out); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v", got)
 	}
 }

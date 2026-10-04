@@ -75,33 +75,15 @@ func LabelsOf(labels []config.Label, e Event) []string {
 // belongs is the one rule for which label an event is under. Summarise and
 // LabelsOf both read it, so a label's row and its steps cannot disagree.
 func belongs(l config.Label, e *Event) bool {
-	if e.Kind == Mention {
-		return matchesMention(l, e)
-	}
-	return matches(l, e)
-}
-
-func matches(l config.Label, e *Event) bool {
 	switch e.Kind {
 	case Skill, Read:
 		return slices.Contains(l.Skills, bareSkill(e.Name))
 	case Snippet:
 		return slices.Contains(l.Snippets, e.Name)
+	case Mention:
+		return slices.ContainsFunc(e.Names, func(n string) bool { return slices.Contains(l.Skills, n) })
 	case Round:
-		for _, prefix := range l.Jobs {
-			if strings.HasPrefix(e.Name, prefix) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func matchesMention(l config.Label, e *Event) bool {
-	for _, n := range e.Names {
-		if slices.Contains(l.Skills, n) {
-			return true
-		}
+		return slices.ContainsFunc(l.Jobs, func(prefix string) bool { return strings.HasPrefix(e.Name, prefix) })
 	}
 	return false
 }

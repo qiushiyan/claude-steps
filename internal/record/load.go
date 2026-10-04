@@ -25,7 +25,7 @@ func IsSessionID(s string) bool { return sessionID.MatchString(s) }
 // Loader turns a session id into a Record.
 type Loader struct {
 	projects string
-	snippets []config.Snippet
+	snippets config.Snippets
 	mentions []mention
 	notes    notes.Store
 }
@@ -69,7 +69,7 @@ func (l *Loader) Load(id string) Record {
 	err = d.read(f)
 	d.finish()
 	switch {
-	case err != nil, d.lines > 0 && d.recognised == 0:
+	case err != nil, d.recognised == 0 && rec.UnreadLines > 0:
 		// Lines of which none decodes as a row mean the format moved; an
 		// empty timeline built from them would read as "nothing ran".
 		rec.Status = Unreadable

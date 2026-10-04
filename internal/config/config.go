@@ -35,8 +35,25 @@ var Colors = []string{"blue", "magenta", "cyan", "green", "yellow"}
 
 // Snippet is a TabType snippet reduced to what a prompt is matched against.
 type Snippet struct {
-	Key  string
-	Head string // the opening of the snippet's text, squashed
+	Key string
+	// Head is the opening of the snippet's text in the form prompts are
+	// compared in: lower case, every run of whitespace one space.
+	Head string
+}
+
+// Snippets are the snippets a prompt can paste.
+type Snippets []Snippet
+
+// Pasted returns the keys of the snippets whose opening the prompt holds.
+func (ss Snippets) Pasted(prompt string) []string {
+	var keys []string
+	flat := squash(prompt)
+	for _, s := range ss {
+		if strings.Contains(flat, s.Head) {
+			keys = append(keys, s.Key)
+		}
+	}
+	return keys
 }
 
 type Config struct {
@@ -45,8 +62,8 @@ type Config struct {
 	Labels      []Label `toml:"label"`
 
 	// NotesDir is derived from the environment, never from the file.
-	NotesDir string    `toml:"-"`
-	Snippets []Snippet `toml:"-"`
+	NotesDir string   `toml:"-"`
+	Snippets Snippets `toml:"-"`
 }
 
 const (
@@ -127,7 +144,7 @@ func expand(path, home string) string {
 	return path
 }
 
-func loadSnippets(path string) ([]Snippet, error) {
+func loadSnippets(path string) (Snippets, error) {
 	var file struct {
 		Snippets []struct {
 			Key    string `toml:"key"`
@@ -140,9 +157,9 @@ func loadSnippets(path string) ([]Snippet, error) {
 		}
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	var out []Snippet
+	var out Snippets
 	for _, s := range file.Snippets {
-		head := []rune(Squash(s.Expand))
+		head := []rune(squash(s.Expand))
 		if s.Key == "" || len(head) < snippetMin {
 			continue
 		}
@@ -154,8 +171,8 @@ func loadSnippets(path string) ([]Snippet, error) {
 	return out, nil
 }
 
-// Squash lowercases text and collapses every run of whitespace to one space,
+// squash lowercases text and collapses every run of whitespace to one space,
 // the form snippets and prompts are compared in.
-func Squash(text string) string {
+func squash(text string) string {
 	return strings.Join(strings.Fields(strings.ToLower(text)), " ")
 }

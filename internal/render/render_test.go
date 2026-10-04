@@ -69,6 +69,41 @@ func TestCutCountsColumns(t *testing.T) {
 	}
 }
 
+// A cell of two styles is cut as its text would be, and the mark takes the
+// style of the span the cut falls in: a warning cut short stays a warning,
+// and one that fits whole leaves the mark to the note after it.
+func TestACellIsCutBySpans(t *testing.T) {
+	painted := View{Color: true}
+	for _, c := range []struct {
+		warning, note string
+		n             int
+		want          string
+	}{
+		{"[1 line could not be read]", " a note that runs on", 46, "\x1b[31m[1 line could not be read]\x1b[0m a note that runs on"},
+		{"[1 line could not be read]", " a note that runs on", 30, "\x1b[31m[1 line could not be read]\x1b[0m a…"}, // no space before the mark
+		{"[1 line could not be read]", " a note that runs on", 27, "\x1b[31m[1 line could not be read]\x1b[0m…"},
+		{"[1 line could not be read]", " a note that runs on", 26, "\x1b[31m[1 line could not be read…\x1b[0m"},
+		{"[1 line could not be read]", " a note that runs on", 10, "\x1b[31m[1 line c…\x1b[0m"},
+		{"[日历]", " 只走一遍", 10, "\x1b[31m[日历]\x1b[0m 只…"},
+		{"[日历]", " 只走一遍", 9, "\x1b[31m[日历]\x1b[0m…"},
+		{"[日历]", " 只走一遍", 4, "\x1b[31m[日…\x1b[0m"},
+		{"[日历]", " 只走一遍", 0, ""},
+	} {
+		if got := painted.paint(of(problem, c.warning).add(plain, c.note).cut(c.n)); got != c.want {
+			t.Errorf("%q and %q cut to %d: %q, want %q", c.warning, c.note, c.n, got, c.want)
+		}
+	}
+	// At every width the text is what cutting the whole string gives.
+	for _, parts := range [][2]string{{"[1 line could not be read]", " (2) a note"}, {"[日历]", " 只走一遍"}, {"!", " a title"}} {
+		whole := parts[0] + parts[1]
+		for n := range width(whole) + 2 {
+			if got := (View{}).paint(of(problem, parts[0]).add(plain, parts[1]).cut(n)); got != cut(whole, n) {
+				t.Errorf("%q cut to %d: %q, the string gives %q", whole, n, got, cut(whole, n))
+			}
+		}
+	}
+}
+
 // Every colour a label may name has a hue, and a label that names none takes
 // one by its place.
 func TestEveryLabelColourHasAHue(t *testing.T) {

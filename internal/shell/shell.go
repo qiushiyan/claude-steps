@@ -294,8 +294,9 @@ func (w *walker) call(c *syntax.CallExpr, sc *scope, in input) {
 	for at+1 < len(words) && (words[at] == "noglob" || words[at] == "nocorrect" || words[at] == "builtin") {
 		at++
 	}
-	if words[at] == "cd" && len(words) == at+2 {
-		sc.dir = join(sc.dir, words[at+1])
+	// `cd -` goes back to a directory the text does not name.
+	if words[at] == "cd" && len(words) == at+2 && words[at+1] != "-" {
+		sc.dir = Resolve(sc.dir, words[at+1])
 	}
 	w.out = append(w.out, Command{Words: words, Stdin: in.body, HasStdin: in.set, Dir: sc.dir, Guarded: w.guard > 0})
 }
@@ -335,17 +336,17 @@ func (w *walker) substitutions(n syntax.Node, sc *scope) {
 	})
 }
 
-// join moves dir by a cd argument.
-func join(dir, to string) string {
+// Resolve returns where a directory argument points for a command that runs
+// in dir, as cd and git -C read one: an absolute path or one under "~" stands
+// alone, and an empty dir leaves a relative path relative.
+func Resolve(dir, arg string) string {
 	switch {
-	case to == "" || to == "-":
+	case arg == "":
 		return dir
-	case path.IsAbs(to) || strings.HasPrefix(to, "~"):
-		return path.Clean(to)
-	case dir == "":
-		return path.Clean(to)
+	case path.IsAbs(arg) || strings.HasPrefix(arg, "~") || dir == "":
+		return path.Clean(arg)
 	}
-	return path.Join(dir, to)
+	return path.Join(dir, arg)
 }
 
 type quoting int
