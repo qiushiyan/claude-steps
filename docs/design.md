@@ -46,16 +46,17 @@ Nothing persists between invocations except the notes.
   which, and what a call's output proves. The shapes envoy prints live here,
   and nothing else writes a round's fields.
 - **`internal/record/commands.go`:** which simple command is a commit, an
-  envoy run or an envoy collect, and what it names. It reads an argv and no
-  transcript row.
+  envoy run, an envoy collect or a skill's file printed, and what it names.
+  It reads an argv and no transcript row.
 - **`internal/shell`:** what a Bash call runs, as simple commands, each with
-  its standard input, the directory it runs in, and whether it runs only on
-  a branch decided at run time (`Guarded`). It parses with `mvdan.cc/sh`, so
-  quoting, here-documents and subshell scope follow the shell's own rules,
-  and nothing in `record` reasons about shell syntax. A directory, a
-  variable and a function hold for the scope that set them. A variable
-  assigned on a branch decided at run time reads as its source text after
-  the branch, since either value may hold.
+  its standard input, the directory it runs in, whether it runs only on a
+  branch decided at run time (`Guarded`), and whether a pipe, a file or a
+  substitution takes what it prints (`Captured`). It parses with
+  `mvdan.cc/sh`, so quoting, here-documents and subshell scope follow the
+  shell's own rules, and nothing in `record` reasons about shell syntax. A
+  directory, a variable and a function hold for the scope that set them. A
+  variable assigned on a branch decided at run time reads as its source text
+  after the branch, since either value may hold.
 - **`internal/record/load.go`:** where transcripts live, the read status, and
   turning what the user typed into a session id.
 - **`internal/record/labels.go`:** which labels an event is under
@@ -151,6 +152,14 @@ Nothing persists between invocations except the notes.
   output, and a commit `internal/shell` marks guarded (after `||`, in an
   `if`, `case` or loop, in the background) needs that line too. A failed
   commit followed by `; true` counts: that is a stated limit.
+- **A skill is loaded with no tool that names it.** Asked in prose to run a
+  skill, the model often prints its file with `cat` and calls neither the
+  Skill nor the Read tool (`docs/EVIDENCE.md`), so a `cat` whose output is
+  the call's own is a read. Nothing in the output proves it: `cat -n` numbers
+  the file's opening lines, and Claude Code sets a long output aside and
+  keeps its start. The read counts on the call's success, a guarded `cat`
+  never counts, and a missing file followed by `; true` counts: that is a
+  stated limit.
 - **A run's failure comes from the call and from envoy's own lines.** envoy
   prints `job: <dir>` once the job exists and exits non-zero when the job
   ends in anything but `ok`. An error after a job line is therefore a round
@@ -223,6 +232,10 @@ Nothing persists between invocations except the notes.
   branch:** a background dispatch prints no line, and loops dispatch real
   rounds. A dispatch that did not happen shows as "no collect seen", which
   sends the user to look (`docs/EVIDENCE.md`).
+- **Any command that names a skill's file as a read** (`sed -n`, `head`,
+  `grep`): each shows a passage, and together they run more often than `cat`
+  prints the file. A lookup after a run would become the label's latest
+  event and restart its commit count (`docs/EVIDENCE.md`).
 - **A block of history under each label, or a lane per label:** the first
   loses the order across labels, the second has no room for an event's text.
 - **A row drawn faint when no label has an event:** such a session can hold

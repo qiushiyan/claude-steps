@@ -186,3 +186,106 @@ the 190 transcripts of the last 7 days.
 - **Revise the block rule** if envoy prints anything between a collect's job
   line and its status: that adjacency is how a collect's block is told from a
   run's.
+
+## 2026-10-05: a skill loaded with `cat`
+
+**Question.** A session had run its verification and its `verify` cell read
+`named`, a prompt's words and no more (`ce72f9de`, on the mini). How does a
+session load a labelled skill, and which loads does the reader not see?
+
+**Corpus.** The transcripts changed in the 14 days before 2026-10-05: 379 on
+the laptop and 103 on the mini, written below in that order. Commands were
+read with `internal/shell` for the skills the labels of that day list. Each
+session was rendered with `show --json` by the binary built at `4ba409b` and
+by the one built at the pass's end.
+
+### Findings
+
+- **The model printed the skill's file with `cat` and called no tool for
+  it.** In `ce72f9de` one prompt asked for a review and, in prose, for
+  `pl-loopy-verify`. The model called the Skill tool for `review` and ran
+  `cat` on the other skill's file, which the session's skill listing held.
+- **`cat` is how a whole skill file is printed.** 78 and 21 `cat` commands
+  name a labelled skill's file. None stands in a call that returned an
+  error; 2 stand after `||`, the second place the file was looked for.
+- **For `pl-loopy-verify` it is about one load in three.** By session,
+  counted by a pattern over the command text: the Skill tool 9 and 9, the
+  Read tool 4 and 2, `cat` 6 and 6, and `cat` alone in 6 and 5. No session
+  typed it as a slash command. Over every labelled skill `cat` is the only
+  load for 58 and 14 pairs of skill and session, `prompt-engineering` in 25
+  and 7 of them.
+- **A passage is shown more often than the file.** `grep` names a labelled
+  skill's file 114 and 34 times and `sed -n` with a line range 65 and 20.
+- **The output does not prove a `cat`.** The skill's `name:` line opens a
+  line of the output for 88 of the 99. Of the other 11, 5 ran `cat -n`
+  (`e0613ba6`, `4fc50d59`, `4aa4a757`), 3 had their output set aside by
+  Claude Code with its start kept (`2eeff918`, `a0c6ac6e`, `626bc884`), and 3
+  were piped into `head` or `sed` (`d057e681`, `75e316e5`).
+- **The prompt that asked was a project-local snippet.** planlab's
+  `loopy-review-verify`, from its `.tabtype.local.toml`, was pasted in 11
+  and 9 sessions and `loopy-prompt-check` in 4 and 4; the global
+  `review-verify` in none. The reader loads one snippets file, so each paste
+  reads as a mention.
+
+### Changed
+
+- **A `cat` that prints a skill's file into the call's output is a read**
+  (`skillsPrinted` in `internal/record/commands.go`), on the call's success
+  and only when the command is not guarded.
+- **`internal/shell` says when a pipe, a file or a substitution takes what a
+  command prints** (`Command.Captured`).
+
+### Measured after
+
+- **`ce72f9de`:** `verify` reads `read`, with 2 commits since, and the read
+  is a step.
+- **Events:** 216 and 56 read events more, for labelled skills and others.
+  No other event differs.
+- **Label states:** 58 differ in 43 laptop sessions and 14 in 12 on the
+  mini. What stood there before: a mention 31 and 6, nothing 9 and 4, a
+  snippet 6 and 3, a skill run 9 and 0, an earlier read 3 and 1. By label on
+  the laptop: `prompts` 27, `docs` 17, `verify` 5, `consult` 4, `review` 2,
+  `pr-review` 2, `spec` 1; on the mini `prompts` 7, `verify` 6, `docs` 1.
+- **A skill run behind a later read:** the 9 are under `docs`. In 7 a
+  `/pl-loopy-handoff` run was followed by `cat` on
+  `pl-loopy-handoff-distill`'s file, 0 to 93 minutes later, and the commit
+  count runs from the read: lower in 5 (`1d1976e1`, `4179276c`, `8889c77f`,
+  `bfe57e0d`, `c8b9f7df`). In 2 `update-docs` was printed in the minute of
+  its own run.
+- **An earlier read behind a later one:** 4 label states in 3 sessions, the
+  commit count lower in 2 (`4fc50d59`, `4aa4a757`).
+- **The sessions that pasted `loopy-review-verify`:** `verify` holds a skill
+  run in 14 of the 20, a read in 3 and a mention in 3. Of those 3, 2 read
+  the skill in passages with `sed -n` (`d057e681`, `cc8ba647`) and 1 holds no
+  load after the paste (`a8e176f3`).
+- **`check`:** no drift from the new binary on either machine.
+
+### Decided by the user
+
+- **A passage is not a read.** `sed`, `head` and `grep` on a skill's file
+  stay out.
+- **Project-local snippets: a design question for a later session.** Whether
+  the reader should load a project's `.tabtype.local.toml`, from where, and
+  which label a paste that asks for two steps stands under.
+
+### Limits
+
+- Sessions were rendered and compared. The 13 label states where a skill run
+  or an earlier read stood were each looked at; the other 59 were counted.
+- The per-skill session counts come from a pattern over the command text,
+  the command counts from `internal/shell`.
+- A snippet was matched by its wording of 2026-10-05, so pastes of an
+  earlier wording are not in the counts.
+
+### The next pass
+
+Compare sessions started after 2026-10-05 whose prompt names a labelled
+skill in prose.
+
+- **Success:** a label reads `named` only where the transcript holds no load
+  of the skill.
+- **Revise the passage rule** if skills read from their first line with
+  `sed -n` grow past the 2 of 20 above.
+- **Reopen the read that follows a run** if a `docs` or `review` cell dated
+  at a read hides the run the user wanted dated: the commit count is lower
+  in 7 of the 482 sessions.

@@ -98,8 +98,13 @@ What a line says:
 - **`skill review  args`:** the model called the Skill tool; `failed to load`
   when the call returned an error.
 - **`read skills/x/SKILL.md`:** the model read a skill's file, as it does
-  when a prompt points at the path.
-- **`pasted <key>`:** a prompt holding the opening of a TabType snippet.
+  when a prompt names the skill or points at the path: a Read call, or a
+  `cat` that printed the file in a call that returned no error. A `cat` that
+  may have been skipped, or whose output went to a pipe or a file, is not a
+  read, and neither is a passage shown by `sed`, `head` or `grep`.
+- **`pasted <key>`:** a prompt holding the opening of a TabType snippet in
+  the file `snippets` names. A project's `.tabtype.local.toml` is not read:
+  a paste from one is a `you: "…"` line when it names a labelled skill.
 - **`you: "…"`:** a prompt that named a labelled skill and ran nothing. Your
   words, not a run.
 - **`review-r1`:** a round among the steps: an `envoy run` here and a
