@@ -78,8 +78,9 @@ A session view reads from the top, newest first:
   transcript holds no collect, newest first, whether or not a label lists
   them. Such a round may be running, collected from another session, or
   given up on; the transcript cannot tell which. A dispatch replaced under
-  the same name is not listed: the later dispatch is the round. `·` says
-  there is none.
+  the same name is not listed: the later dispatch is the round. A run counts
+  as dispatched when its call returned no error, so one on a branch that was
+  skipped, or one envoy refused, is listed too. `·` says there is none.
 - **`notes`:** your latest notes. `show --all` lists every one.
 - **`steps`:** what ran under a label, and your notes at the time you wrote
   them. A round is one step, at its dispatch, so the `review` lines count the
@@ -107,15 +108,19 @@ What a line says:
     without these words was collected.
   - **`envoy said partial`:** envoy's status for the job when it is not
     `ok`. `ok` says a result came back, not that a review passed.
-  - **`collect returned an error`, `run returned an error`:** the call
-    failed.
+  - **`collect returned an error`:** the collect call failed.
+  - **`run returned an error`:** the call that ran envoy failed, and envoy
+    did not say the job ended `ok`. The round keeps a line of its own, and
+    says its collect in full when one followed: `run returned an error,
+    collected, envoy said timeout`.
   - **`dispatched 2 times`:** the name was dispatched again before any
     collect.
-  - **`no dispatch seen`:** the transcript holds only the collect.
+  - **`no dispatch seen`:** the transcript holds no dispatch this collect
+    could have read.
 - **`review-r1  /review  args`:** the round, and the latest skill run before
-  it under its label, unless an earlier round carries that run. The two are
-  joined by their order alone. A skill run no round carries keeps a line of
-  its own.
+  it under any of its labels, unless an earlier round carries that run. The
+  round and the run are joined by their order alone. A skill run no round
+  carries keeps a line of its own.
 - **`review-r1  dispatched` / `collected`:** the same round in the full
   history, where the dispatch, the collect and the skill run each have a line
   at their own time.
@@ -135,12 +140,14 @@ time of the newest round with no collect seen, and `×2` when there are two.
 
 A transcript that cannot be read says so (`no transcript`,
 `transcript unreadable`, `3 lines could not be read`) and is never drawn as an
-empty timeline. `the reader may have missed …` says a fact may be absent
-from the view: Claude Code's transcript format may have moved, or an envoy
-call took its job from a variable or a file and printed no `job:` line.
-`claude-steps check` says whether the misses amount to drift. On the board
-`!` before a title marks such a session, and the words are in its note cell
-where there is room.
+empty timeline. `no transcript` says every project directory was looked in;
+one that could not be is `transcript unreadable`, with its path, and
+`claude-steps check` fails. `the reader may have missed …` says a fact may
+be absent from the view: Claude Code's transcript format may have moved, or
+an envoy call took its job from a variable or a file and printed no `job:`
+line. `claude-steps check` says whether the misses amount to drift. On the
+board `!` before a title marks such a session, and the words are in its note
+cell where there is room.
 
 Colour names and never grades. Each label's name has a hue; red marks an
 error the transcript reports and what the reader could not read; a count of

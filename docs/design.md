@@ -17,10 +17,10 @@ tells the model nothing.
   is under the same stand: a hue names a label, red marks an error the
   transcript reports or something unread, weight marks a count of commits
   that is not zero, and nothing grades a date.
-- **Unknown is shown as unknown.** A line that does not decode, a file that
-  cannot be read and a fact the reader may have missed are all said at the
-  top of the view, because a silent skip reads as "nothing ran". The steps
-  leave rows to the full history and say how many it holds.
+- **Unknown is shown as unknown.** A line that does not decode, a file or a
+  directory that cannot be read and a fact the reader may have missed are
+  all said at the top of the view, because a silent skip reads as "nothing
+  ran". The steps leave rows to the full history and say how many it holds.
 - **One reader.** Every command gets a session from `record.Loader.Load`, so
   the board and the session view cannot disagree.
 
@@ -41,11 +41,21 @@ Nothing persists between invocations except the notes.
   Claude Code documents the format as internal, so a format change is
   repaired here and nowhere else. Rows are decoded as JSON structurally; no
   rule depends on spacing or key order.
+- **`internal/record/rounds.go`:** what a session's Bash calls show of envoy,
+  joined into rounds: which round a collect read, which dispatch replaced
+  which, and what a call's output proves. The shapes envoy prints live here,
+  and nothing else writes a round's fields.
+- **`internal/record/commands.go`:** which simple command is a commit, an
+  envoy run or an envoy collect, and what it names. It reads an argv and no
+  transcript row.
 - **`internal/shell`:** what a Bash call runs, as simple commands, each with
   its standard input, the directory it runs in, and whether it runs only on
   a branch decided at run time (`Guarded`). It parses with `mvdan.cc/sh`, so
   quoting, here-documents and subshell scope follow the shell's own rules,
-  and nothing in `record` reasons about shell syntax.
+  and nothing in `record` reasons about shell syntax. A directory, a
+  variable and a function hold for the scope that set them. A variable
+  assigned on a branch decided at run time reads as its source text after
+  the branch, since either value may hold.
 - **`internal/record/load.go`:** where transcripts live, the read status, and
   turning what the user typed into a session id.
 - **`internal/record/labels.go`:** which labels an event is under
@@ -57,11 +67,13 @@ Nothing persists between invocations except the notes.
   repeats, so a merge from another machine (`claude-steps import-notes`)
   appends what is missing and can never lose a note written meanwhile.
 - **`internal/render`:** pure functions from records to text and JSON; the
-  current time, the width to fill and whether to paint are passed in. It owns
-  the layers of a session view, which lines are steps, every style, and the
-  fit to a width. A line is built from cells that carry their text and their
-  style apart, so alignment measures text alone and the plain output is the
-  painted output with the escapes removed.
+  current time, the labels, the width to fill and whether to paint are passed
+  in. It works out a session's label states from those labels, so a board's
+  header and its cells have one source. It owns the layers of a session
+  view, which lines are steps, every style, and the fit to a width. A line
+  is built from cells that carry their text and their style apart, so
+  alignment measures text alone and the plain output is the painted output
+  with the escapes removed.
 - **The popup:** `~/dotfiles/tmux/.config/tmux/scripts/tmux-steps.sh`. It
   owns fzf, keys and pane switching and shows only what the binary prints.
   It reads the binary through a pipe, so it asks for colour and gives each
@@ -72,11 +84,19 @@ Nothing persists between invocations except the notes.
 - **Event:** one dated fact. The kinds are the `Kind` constants in
   `internal/record/record.go`; an event's time is its row's, and for a tool
   call that is the call.
+- **Round:** an envoy job as the transcript shows it: a dispatch, a collect,
+  or both. A collect belongs to the round its name read when its command
+  ran, and takes its own block of the call's output, so a call's collects
+  each keep their own status and a dispatch later in the call is a new
+  round. A dispatch under a name whose round is still waiting for a collect
+  replaces that round (`Redispatched`) and says how many dispatches it
+  stands for.
 - **Label state:** the latest matching event that did not fail, and the
   commits made after it started. For a round that start is the dispatch: a
   reviewer reads the code as it stood then; the label's row says when the
-  collect happened. A prompt that only names a skill counts when nothing else
-  matches, and never gets a commit count.
+  collect happened. A round whose run returned an error did not fail once it
+  was collected: a result came back. A prompt that only names a skill counts
+  when nothing else matches, and never gets a commit count.
 - **Step:** an event under a label, or a note. A session view lists the
   steps newest first, with the commits between two as one count line; every
   other line is in the full history (`show --all`). The view is opened to ask
@@ -86,20 +106,22 @@ Nothing persists between invocations except the notes.
   the rounds run. The line is dated at the dispatch, like the label, so the
   commits above it are the ones its reviewer did not read. It says what the
   transcript holds only where that is not one dispatch and a collect that
-  returned a result. It takes the place of the latest skill run before it
-  under its label, unless an earlier round took that run, and carries the
-  run's words. The join is by order alone, so no line says a skill run
-  caused a round. The full history keeps the dispatch, the collect and the
-  skill run apart.
+  returned a result; a run that returned an error is such a case, so its
+  line says the collect in full. It takes the place of the latest skill run
+  before it under any of its labels, unless an earlier round took that run,
+  and carries the run's words. The join is by order alone, so no line says a
+  skill run caused a round. A replaced dispatch has no line. The full
+  history keeps the dispatch, the collect and the skill run apart.
 - **Uncollected round:** a round this session dispatched for which the
   transcript holds no collect. It is listed apart from the labels, because a
   label state keeps only its latest event and a round no label lists has no
   row. The words are "no collect seen": the round may be running, collected
-  from another session, or given up on. A dispatch the session replaced
-  under the same name before any collect is not one (`Redispatched`): it is
-  counted on the later round's line.
-- **Read status:** `ok`, `partial`, `unreadable`, `missing`. The last two
-  never render as an empty timeline.
+  from another session, or given up on. A replaced dispatch is not one, and
+  neither is a run that returned an error (`Event.Waiting`).
+- **Read status:** `ok`, `partial`, `unreadable`, `missing`. `missing` says
+  every directory that could hold the transcript was looked in; one that
+  could not be is `unreadable`, with its path. Neither renders as an empty
+  timeline.
 - **Signals:** each fact is counted by the reader's rule and by a second
   trace that should exist whenever the first does. A second trace with no
   match is a miss, and so is an envoy call whose job neither its text nor
@@ -107,6 +129,8 @@ Nothing persists between invocations except the notes.
   missing from it, and `check` sums a week of transcripts. `check` also fails
   on any line that does not decode: Claude Code writes whole lines, so one it
   could not have written in the shape the reader knows means the shape moved.
+  It fails too when the transcripts cannot all be listed: it would report no
+  drift over what it never read.
 
 ## Traps the code cannot show
 
@@ -127,6 +151,15 @@ Nothing persists between invocations except the notes.
   output, and a commit `internal/shell` marks guarded (after `||`, in an
   `if`, `case` or loop, in the background) needs that line too. A failed
   commit followed by `; true` counts: that is a stated limit.
+- **A run's failure comes from the call and from envoy's own lines.** envoy
+  prints `job: <dir>` once the job exists and exits non-zero when the job
+  ends in anything but `ok`. An error after a job line is therefore a round
+  a collect can still read; an error with no job line ran nothing, replaced
+  no round, and leaves the name reading what it read before. A job envoy
+  says ended `ok` did not fail because a later command of the call did. A
+  background dispatch prints nothing, so a run on a branch decided at run
+  time, and one envoy refused in a call that returned no error, read as
+  dispatched: that is a stated limit.
 - **envoy's `ok` means the job returned a result.** Beside a review it would
   read as "passed", so it is not printed. `collect --status-only` is a probe,
   and a collect that prints no status keeps the word already read.
@@ -143,7 +176,8 @@ Nothing persists between invocations except the notes.
 - **A collect's job is not always in the command text.** A loop collects
   `"$j"`, and a path read from a file arrives as `"$(…)"`; `internal/shell`
   keeps such a word as its source text. The reader names the job from the
-  `job:` lines envoy printed, and counts a miss when there are none.
+  blocks envoy printed, and counts a miss when there are none. A fan-out's
+  own block names the round; its members' blocks are not rounds.
 - **Claude Code wraps pasted text in `<pasted_content id="…">`.** The tag is
   not the user's words, so a mention drops it.
 - **The terminal draws bold in a colour of the theme's own.** A hue under
@@ -185,6 +219,10 @@ Nothing persists between invocations except the notes.
 - **A step each for a round's dispatch, its collect and the skill run before
   it:** the lines under a label then do not count its rounds, and the steps
   run half as long again for the same facts (`docs/EVIDENCE.md`).
+- **Asking envoy's job line of every dispatch, or leaving out a run on a
+  branch:** a background dispatch prints no line, and loops dispatch real
+  rounds. A dispatch that did not happen shows as "no collect seen", which
+  sends the user to look (`docs/EVIDENCE.md`).
 - **A block of history under each label, or a lane per label:** the first
   loses the order across labels, the second has no room for an event's text.
 - **A row drawn faint when no label has an event:** such a session can hold
@@ -218,6 +256,10 @@ Nothing persists between invocations except the notes.
 - **Claude Code changed a row shape:** fix the rule in `decode.go`, add the
   shape to `internal/fixture`, pin it with a case in
   `internal/record/record_test.go`, then run `claude-steps check`.
+- **envoy changed what it prints or takes:** the output's shapes are in
+  `internal/record/rounds.go` and the argv grammar in
+  `internal/record/commands.go`; pin the shape with a case in
+  `internal/record/rounds_test.go`.
 - **A new kind of fact:** an event kind, its rule, a second trace for it, its
   line in `render`, and its line in the README.
 - **A new line or cell in a view:** build it from cells with a style, never

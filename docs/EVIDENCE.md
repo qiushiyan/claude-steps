@@ -115,3 +115,74 @@ Compare sessions started after 2026-10-04 that hold three rounds or more.
 - **Revise the miss** if `claude-steps check` fails on envoy rounds, or the
   `!` on a session for an unnamed collect turns out to be noise: it stood on
   3 of 227.
+
+## 2026-10-05: the reader before and after a code-quality pass
+
+**Question.** A pass gave rounds one owner and changed how a collect and a
+failed run are read. Does it print anything else for real sessions, and is
+what it changes right? The cold voice of `consult-r1` had shown the faults on
+fixtures; this pass asked how many real sessions held them.
+
+**Corpus.** The 613 sessions whose transcript changed in the 30 days before
+2026-10-05, on the laptop. Each was rendered with `show`, `show --all` and
+`show --json` at `COLUMNS=150` by the binary built at `f8cd50b` and by the one
+built at the pass's end. A pair that differed was rendered again, since two
+runs can fall either side of a relative time. Both binaries ran `check` over
+the 190 transcripts of the last 7 days.
+
+### Findings
+
+- **A fan-out's members were listed as rounds.** 2 sessions: a collect through
+  a variable printed the set's block and each member's, and the members became
+  rounds named `codex` and `codex-2` (`75e316e5`, `918c0183`).
+- **A collect was joined to a dispatch made after it.** 1 session, 2 calls:
+  `envoy collect x`, then `envoy run x`, in one call. The collect read as the
+  later dispatch's, and the earlier dispatch as replaced (`4c5605d8`).
+- **No session printed differently for the other faults the fixtures show:**
+  a call's collects sharing one status, a failed run taking the count of the
+  dispatches before it, a variable set in a subshell read outside it.
+- **The pass's own first cut took a collect's block for a run's.** 1 session:
+  a run and a collect in one call, each cut by `tail`, so the output held the
+  collect's block alone (`502cbcb2`). This comparison found it.
+
+### Changed
+
+- **A collect belongs to the round its name read when its command ran,** and
+  each command takes its own block of the output, a run's or a collect's
+  (`internal/record/rounds.go`).
+- **A fan-out's own block names the round.**
+- **A run's error is read against envoy's job line,** and a round that was
+  collected counts for its label whatever its run returned.
+
+### Measured after
+
+- **`show`:** 3 of the 613 sessions print differently, the 3 named above, and
+  the same 3 under `show --all`.
+- **`show --json`:** 14 sessions differ. They hold 513 events before and
+  after; 10 events carry `dispatches`, and 1 carries `collect_failed` where it
+  had `"outcome": "error"`.
+- **`check`:** the same output from both binaries over the 190 transcripts,
+  and no drift. envoy rounds: 201 by the reader's rule, 78 by the second
+  trace, 4 missed.
+
+### Decided by the user
+
+- **A dispatch the transcript cannot prove: leave it.** A run on a branch
+  decided at run time, and a run envoy refused in a call that returned no
+  error, read as dispatched. 1 session of the 613 shows it: 2 "no collect
+  seen" rows in `4c5605d8` are runs envoy refused, in a test of envoy itself.
+
+### Limits
+
+- The faults no session showed were fixed on fixtures alone.
+- Sessions were rendered and compared; nobody read the views. The popup's own
+  test in the dotfiles passes on the installed binary.
+- The dispatches in the corpus that stand on a branch were not counted.
+
+### The next pass
+
+- **Reopen the decision above** if a "no collect seen" row names a run that
+  did not happen, in a session that is not a test of envoy.
+- **Revise the block rule** if envoy prints anything between a collect's job
+  line and its status: that adjacency is how a collect's block is told from a
+  run's.
