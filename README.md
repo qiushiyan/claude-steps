@@ -102,9 +102,13 @@ What a line says:
   `cat` that printed the file in a call that returned no error. A `cat` that
   may have been skipped, or whose output went to a pipe or a file, is not a
   read, and neither is a passage shown by `sed`, `head` or `grep`.
-- **`pasted <key>`:** a prompt holding the opening of a TabType snippet in
-  the file `snippets` names. A project's `.tabtype.local.toml` is not read:
-  a paste from one is a `you: "…"` line when it names a labelled skill.
+- **`pasted <key>`:** a prompt holding the opening of a TabType snippet from
+  a file `snippets` names. It is a request: the skill it asks for has a line
+  of its own where the transcript holds its run or its read. A prompt typed
+  by hand with the same opening reads the same. A snippet that opens with a
+  slash command and arrives as that command is the `/review  args` line and
+  a `pasted` line at one time, and the paste is a step only under a label the
+  run is not under.
 - **`you: "…"`:** a prompt that named a labelled skill and ran nothing. Your
   words, not a run.
 - **`review-r1`:** a round among the steps: an `envoy run` here and a
@@ -139,8 +143,9 @@ What a line says:
 
 On the board a label's cell is the time of its latest event (`11m`, `2d`);
 for a round that is the dispatch. `+2` counts the commits made since that
-event started; `read` or `named` in front says the latest event was only a
-file read or only a prompt; `·` says nothing matches. `no collect` holds the
+event started; `read`, `pasted` or `named` in front says the latest event was
+only a file read, only a pasted snippet, or only a prompt that named the
+skill; `·` says nothing matches. `no collect` holds the
 time of the newest round with no collect seen, and `×2` when there are two.
 
 A transcript that cannot be read says so (`no transcript`,
@@ -176,7 +181,10 @@ and notes, and `show` prints the whole timeline.
 
 ```toml
 projects_dir = "~/.claude/projects"            # default
-snippets     = "~/.config/tabtype/config.toml" # default; no file, no snippet lines
+snippets = [                                   # default: the first file alone
+  "~/.config/tabtype/config.toml",
+  "~/dev/app/.tabtype.local.toml",             # a project's own snippets
+]
 
 [[label]]
 name = "review"
@@ -186,6 +194,15 @@ jobs = ["review-"]                        # envoy job-name prefixes
 count_commits = true                      # add "+N" commits since the latest event
 color = "cyan"                            # the name's hue: blue, magenta, cyan, green or yellow
 ```
+
+`snippets` is a TabType file or a list of them, in TOML. A file that does
+not exist holds no snippets, so one configuration serves a machine that
+lacks a project's checkout; a file that does not decode is an error. A
+snippet is matched by the opening 80 characters its file holds today, and a
+key worded differently in another file is recognised by either wording. Name
+a project's file and list its keys under their labels together: a pasted
+prompt is not read for the skills it names, so a key no label lists leaves
+nothing among the steps.
 
 A label with no `color` takes blue, magenta, cyan or green by its place in
 the file; yellow is by choice only, since it does not carry text on a light

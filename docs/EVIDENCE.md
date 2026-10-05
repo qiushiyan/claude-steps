@@ -289,3 +289,108 @@ skill in prose.
 - **Reopen the read that follows a run** if a `docs` or `review` cell dated
   at a read hides the run the user wanted dated: the commit count is lower
   in 7 of the 482 sessions.
+
+## 2026-10-05: a project's own snippets
+
+**Question.** planlab starts its review, verification and prompt passes from
+snippets in the project's own `.tabtype.local.toml`, which the reader did not
+load, so each paste read as a mention. Should the reader load such a file,
+from where, and what would a recognised paste change?
+
+**Corpus.** Two populations, written below as the laptop then the mini.
+
+- **The rendered window:** the transcripts last changed at or after
+  2026-09-21 13:00 local time, 379 and 104. The edge is fixed because a
+  window cut 14 days before the run slides while the pass runs: 3 laptop
+  sessions left it within the hour, one of them among the 3 below. Each
+  transcript was rendered with `show --json` by the binary built at
+  `6ffe9e0` under the labels of that day, and by the one built at the pass's
+  end under the labels the pass set.
+- **The indexed turns:** the user turns from 2026-09-21 in each machine's
+  obelisk index, searched for a line of a snippet's text. A session moved
+  between the machines can be in both.
+
+### Findings
+
+- **A session outlives its worktree.** Over the indexed turns 12 and 11
+  sessions pasted `loopy-review-verify`, each in a planlab worktree. The
+  working directory still stands for 3 and 2.
+- **The paste arrives as text or as its own command.** By session: text
+  alone in 9 and 7, a `/review` command alone in 1 and 2, both in 2 and 2
+  (`8889c77f`, `a9eafb70`). Every arrival as text was wrapped in Claude
+  Code's paste tag.
+- **The reader never matched a command against a snippet.** The global
+  `review-verify` is one line and arrived as a command in each of its 6 and
+  3 pastes, which is why the entry above counts it in no session.
+- **The two machines held the same files.** The copies of planlab's file
+  were the same byte for byte, and so were the global files.
+- **planlab's file had been rewritten that day.** Against the mini's copy of
+  2026-09-27: `loopy-review-verify` and `loopy-prompt-check` open the same,
+  the second edited past its 80th character; 2 keys are retired, pasted in
+  no session of the indexed turns; `loopy-closeout` is reworded, its earlier
+  wording pasted in 17 laptop sessions.
+- **The binary of that day refuses a list in `snippets`,** and every command
+  then fails with that message.
+
+### Changed
+
+- **`snippets` names a list of files,** read into one set for every session
+  (`internal/config`).
+- **A command row's name and arguments are matched** (`decoder.user`), and a
+  paste typed as a command is a step only under a label that does not list
+  the command's skill (`belongs`).
+- **A cell dated at a paste says `pasted`** (`labelCell`).
+- **The labels, in the dotfiles:** planlab's file is named,
+  `loopy-review-verify` stands under `review` and `verify`, and
+  `loopy-prompt-check` under `prompts`.
+
+### Measured after
+
+Over the rendered window.
+
+- **Paste events:** 14 and 13 of `loopy-review-verify` in 12 and 11
+  sessions, 3 and 4 of them a command that loaded its skill; 4 and 5 of
+  `loopy-prompt-check` in 4 and 4; 5 and 2 of `loopy-closeout` and 6 and 3
+  of `review-verify`, each a command.
+- **Mentions:** 15 and 14 fewer, the same prompts. No other event differs.
+- **Label states:** 3 differ, each `verify` on the laptop, from a mention to
+  a paste: `a8e176f3` with 10 commits since, `cc8ba647` with 14, `d057e681`
+  with 4. None differs on the mini.
+- **With the key under `verify` alone:** the same 3 and no other. **Under
+  `review` alone:** those 3 go from a mention to nothing.
+- **Cells that say `pasted`:** `spec` in 13 of 25 and 11 of 12 sessions that
+  hold any event under it, each `implement-spec`; `prompts` in 6 of 64 and 1
+  of 19, each `prompt-check`; `verify` in 3 of 25 and 0 of 21.
+- **`check`:** no drift from the new binary over the laptop's 183
+  transcripts of the last 7 days.
+
+### Decided by the user
+
+- **A paste dates its label,** with the commits since, and the cell says
+  `pasted`.
+- **`loopy-review-verify` stands under `review` and `verify`.**
+
+### Limits
+
+- Sessions were rendered and compared. Two views were read after the change
+  (`a8e176f3`, `8889c77f`); the rest were counted.
+- A command row's shape was read in three laptop transcripts.
+- The 5 and 2 `loopy-closeout` rows are commands from before the snippet had
+  those words (`~/dotfiles/tabtype/EVIDENCE.md`): typed by hand, and read as
+  pasted.
+- On the mini the new binary ran from a scratch directory, and `check` was
+  not run there. The popup's own test in the dotfiles was not run.
+
+### The next pass
+
+Compare sessions started after 2026-10-05 that paste one of planlab's
+snippets.
+
+- **Success:** a `verify` cell reads `named` only where the prompt was typed
+  by hand.
+- **Revise the word in the cell** if `pasted` under `spec` costs the title
+  its room at the popup's width.
+- **Reopen the source** if a second project keeps snippets of its own at a
+  path that differs between the machines.
+- **Look at the two copies** if a session moved with `claude-tomini` shows a
+  `you: "…"` line where the laptop showed a paste: the copies have parted.

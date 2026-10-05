@@ -63,6 +63,11 @@ Nothing persists between invocations except the notes.
   (`LabelsOf`), a label's latest event and the commits since. A label is a
   board column with no state, and labels are not exclusive: a label's row and
   a session's steps read the one membership rule.
+- **`internal/config`:** which files hold snippets, and what a snippet is
+  reduced to: its key and the opening of its text. `loadSnippets` is the one
+  reader of TabType's file. The set is built from the configuration alone
+  and is the same for every session: no rule looks for a file from a
+  session's directory.
 - **`internal/notes`:** one file per session id, readable when the transcript
   is gone. It is only ever appended to; reading sorts by time and drops exact
   repeats, so a merge from another machine (`claude-steps import-notes`)
@@ -97,7 +102,15 @@ Nothing persists between invocations except the notes.
   reviewer reads the code as it stood then; the label's row says when the
   collect happened. A round whose run returned an error did not fail once it
   was collected: a result came back. A prompt that only names a skill counts
-  when nothing else matches, and never gets a commit count.
+  when nothing else matches, and never gets a commit count. A paste counts
+  as a run does: it dates the label and starts the count. It is a request
+  all the same, so the board's cell says `pasted`, as it says `read`.
+- **Paste:** a prompt that holds a snippet's opening, typed as text or as a
+  slash command with its arguments. As a command that loaded its skill it is
+  the paste and the run, each an event at that time. Under a label that
+  lists the command's skill the run is the prompt's one line, and the paste
+  is a step under any other label that lists its key. A pasted prompt is not
+  read for the skills it names.
 - **Step:** an event under a label, or a note. A session view lists the
   steps newest first, with the commits between two as one count line; every
   other line is in the full history (`show --all`). The view is opened to ask
@@ -188,7 +201,16 @@ Nothing persists between invocations except the notes.
   blocks envoy printed, and counts a miss when there are none. A fan-out's
   own block names the round; its members' blocks are not rounds.
 - **Claude Code wraps pasted text in `<pasted_content id="…">`.** The tag is
-  not the user's words, so a mention drops it.
+  not the user's words, so a mention drops it. A wrapped paste is text: the
+  slash command a snippet opens with does not run, and the model calls the
+  Skill tool itself. Unwrapped, the same snippet is that command, and the
+  rest of its words are the arguments. Which happens is not the snippet's
+  choice (`docs/EVIDENCE.md`), so both are matched.
+- **A snippet is matched by the opening its file holds today.** Rewording the
+  first 80 characters loses the pastes of the earlier text; an edit past
+  them loses none. The match is on words alone, so a prompt typed by hand
+  with a snippet's opening reads `pasted`. A file that keeps a retired
+  wording under its key can be named in `snippets`.
 - **The terminal draws bold in a colour of the theme's own.** A hue under
   bold is lost, so no span is both; emphasis is weight alone.
 - **Yellow does not carry text on a light background** (2.16:1 on one of the
@@ -236,6 +258,16 @@ Nothing persists between invocations except the notes.
   `grep`): each shows a passage, and together they run more often than `cat`
   prints the file. A lookup after a run would become the label's latest
   event and restart its commit count (`docs/EVIDENCE.md`).
+- **A project's snippet file found from the session's directory:** a session
+  outlives its worktree, so a transcript would read as a paste while the
+  work was open and as a mention after the merge (`docs/EVIDENCE.md`). The
+  reader would also keep a copy of TabType's rules for a project root and
+  for a worktree's primary checkout.
+- **A bare date for a paste in a label's cell:** under a label that lists a
+  skill it reads as the skill having run.
+- **A pasted prompt read for skill names too,** so that a label listing the
+  skill and not the key shows `named`: every paste becomes a second row of
+  the full history.
 - **A block of history under each label, or a lane per label:** the first
   loses the order across labels, the second has no room for an event's text.
 - **A row drawn faint when no label has an event:** such a session can hold
@@ -259,8 +291,10 @@ Nothing persists between invocations except the notes.
   `$XDG_STATE_HOME/claude-steps/notes/<id>.jsonl`, one JSON note per line.
   `claude-tomini` sends a moved session's file to `claude-steps import-notes`
   on the mini.
-- **The configuration keys:** the labels, and the hue each may name, live in
-  the dotfiles `claude-steps` package.
+- **The configuration keys:** the labels, the hue each may name and the
+  snippet files live in the dotfiles `claude-steps` package. A binary
+  refuses a key it does not know and a value of another type, so a new one
+  reaches a machine with the binary that reads it, or after it.
 - **`@claude_ctx_sid`:** set by the dotfiles context chip; without it the
   board is empty.
 
@@ -273,6 +307,9 @@ Nothing persists between invocations except the notes.
   `internal/record/rounds.go` and the argv grammar in
   `internal/record/commands.go`; pin the shape with a case in
   `internal/record/rounds_test.go`.
+- **A project gains snippets of its own:** name its file in `snippets` and
+  list its keys under their labels, both in the dotfiles package. A key no
+  label lists is a row of the full history and never a step.
 - **A new kind of fact:** an event kind, its rule, a second trace for it, its
   line in `render`, and its line in the README.
 - **A new line or cell in a view:** build it from cells with a style, never
@@ -285,6 +322,7 @@ Nothing persists between invocations except the notes.
 
 `docs/specs/2026-10-02-session-view.md` holds what this page leaves out:
 the measured premises behind each rule, and the numbered obligations the
-tests cite. `docs/EVIDENCE.md` holds what the views showed for real
+tests cite. `docs/specs/2026-10-05-project-snippets.md` holds the same for
+the snippet files and the paste. `docs/EVIDENCE.md` holds what the views showed for real
 sessions: each pass's counts, what it changed, and what the next should
 compare.

@@ -152,7 +152,7 @@ The whole grammar of a label's cell:
 
 The measurements below are of 2026-10-05, on the laptop then the mini. Two populations are used and each count names its own.
 
-- **The rendered window:** every transcript changed in the 14 days before 2026-10-05, 379 and 103, rendered with `show --json` by the binary built at `6ffe9e0` under the labels of that day, and by this change's binary under the labels of § Delivery.
+- **The rendered window:** every transcript last changed at or after 2026-09-21 13:00 local time, 379 and 104, rendered with `show --json` by the binary built at `6ffe9e0` under the labels of that day, and by this change's binary under the labels of § Delivery.
 - **The indexed turns:** user turns from 2026-09-21 in the session index of each machine, searched for a line of the snippet's text. A session moved between the machines can be in both.
 
 **Decision: name the files in `snippets`.** Settled.
