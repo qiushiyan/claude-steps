@@ -166,9 +166,10 @@ through a pipe with `CLICOLOR_FORCE=1`, and never with `NO_COLOR` set.
 
 With `COLUMNS` set, a view fits that width: an event's text is cut to one
 line, and on the board the title and the note give way while the label cells
-keep theirs. A note with no room is left to the session view. In a header
-that does not fit one line the pull requests start a line of their own, and
-a link is never cut.
+keep theirs. A note with no room is left to the session view, and where the
+cells alone leave the title no room the columns close up to one space. In a
+header that does not fit one line the pull requests start a line of their
+own, and a link is never cut.
 
 Not shown: commits made by a subagent, by `git merge`, `rebase` or
 `cherry-pick`, or inside a script.

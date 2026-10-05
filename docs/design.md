@@ -316,7 +316,9 @@ Nothing persists between invocations except the notes.
   a string that holds an escape. `TestColourIsTheSameTextPainted` holds the
   painted and the plain output to one text, `TestBoard` pins the grammar of a
   cell, and `TestTheBoardFitsTheWidth` holds the label cells whole at any
-  width.
+  width. A cell that says more is wider on every row of its column, and
+  `TestTheBoardClosesUpBeforeItRunsOver` holds what gives way when the cells
+  alone are too wide: the space between columns, never a cell.
 
 ## The build's record
 

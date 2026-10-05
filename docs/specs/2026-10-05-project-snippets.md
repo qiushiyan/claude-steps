@@ -52,7 +52,7 @@ Where: § Behaviour describes the six situations; § Design carries the rules, t
 
 ### A snippet from a project's file is pasted and arrives as text
 
-Claude Code wraps a pasted block of several lines in `<pasted_content>`, so a snippet that opens with `/review` and runs over several lines arrives as text, and the model calls the Skill tool itself.
+Claude Code wraps most pastes of a snippet of several lines in `<pasted_content>`. A wrapped paste is text: the `/review` it opens with does not run, and the model calls the Skill tool itself.
 
 Today: the steps hold `you: "/review codex full review. While you…"` under `review` and `verify`. Each of those labels reads `named` on the board unless a run, a read or a round follows.
 
@@ -60,7 +60,7 @@ After: the steps hold `pasted loopy-review-verify` under every label that lists 
 
 Mechanism: `decoder.prompt` in `internal/record/decode.go`, unchanged, now matches against the snippets of every named file (§ Design — Wiring).
 
-If it recurs: every paste is a line of its own. Equal lines in a row collapse to one with a count, as they do today.
+If it recurs: every paste is a line of its own. Equal lines in a row under the same labels collapse to one with a count.
 
 ### The same snippet arrives as its slash command
 
@@ -139,33 +139,35 @@ The whole grammar of a label's cell:
 - Today and after: a prompt recognised as a paste is not read for skill names (`decoder.prompt`).
 - Today: `belongs` puts a paste under every label that lists its key. After: except a label that lists the skill the paste's own command ran.
 - Today: a paste and a skill run both draw a bare date in `labelCell`. After: a paste draws `pasted` in front.
+- Today: equal lines in a row are one line with a count, whatever labels they are under (`collapse` in `internal/render/timeline.go`). After: only under the same labels, since a paste typed as its command and the same paste as text are under different ones.
+- Today: when the label cells leave the title less than its floor, a board row runs past the width (`Board`). After: the columns close up to one space first and the fit is made again.
 
 ### Rejected shapes
 
-- **Find the file from the session's working directory**, the project root's file and, for a linked worktree, the primary checkout's. It optimises for no path in the configuration. It loses because a session outlives its worktree: of the 23 sessions that pasted planlab's review snippet, the working directory still exists for 5 on 2026-10-05 (§ Design — Premises), so 18 would read as a paste while the work was open and as a mention after the merge. It would also keep a second copy of two TabType rules, which directory is a project root and how a worktree names its primary checkout, and `config.Snippets` would become a set per session. The path it saves is one line in a file that must be edited anyway, since a label has to list the key.
+- **Find the file from the session's working directory**, the project root's file and, for a linked worktree, the primary checkout's. It optimises for no path in the configuration. It loses because a session outlives its worktree: of the 22 pasting sessions found in the indexed turns, the working directory still exists for 5 on 2026-10-05 (§ Design — Premises), so 17 would read as a paste while the work was open and as a mention after the merge. It would also keep a second copy of two TabType rules, which directory is a project root and how a worktree names its primary checkout, and `config.Snippets` would become a set per session. The path it saves is one line in a file that must be edited anyway, since a label has to list the key.
 - **Keep the opening to match in the label**, beside the key. It optimises for no dependence on any snippet file. It loses because the wording then has two homes, and the label's copy goes stale the day the snippet is reworded.
 - **Read a pasted prompt for skill names too**, so a label that does not list the key still shows `named`. It loses because every paste would be two rows of the full history, in sessions this change does not otherwise touch.
-- **Leave a slash command's words unmatched**, as today. It loses because the paste is then seen only while Claude Code wraps it: 7 of the 27 pastes of planlab's review snippet in the window arrived as a command that loaded its skill, and a snippet rewritten onto one line would arrive that way every time.
+- **Leave a slash command's words unmatched**, as today. It loses because the paste is then seen only while Claude Code wraps it: 7 of the 27 pastes of planlab's review snippet in the window arrived as a command that loaded its skill, and the global `review-verify`, which is one line, arrived that way in each of its 9.
 - **A bare date for a paste**, as a paste has today. The first call in § Delivery weighs it.
 
 ### Premises
 
 The measurements below are of 2026-10-05, on the laptop then the mini. Two populations are used and each count names its own.
 
-- **The rendered window:** every transcript last changed at or after 2026-09-21 13:00 local time, 379 and 104, rendered with `show --json` by the binary built at `6ffe9e0` under the labels of that day, and by this change's binary under the labels of § Delivery.
-- **The indexed turns:** user turns from 2026-09-21 in the session index of each machine, searched for a line of the snippet's text. A session moved between the machines can be in both.
+- **The rendered window:** every transcript last changed at or after 2026-09-21 13:00 local time, 379 and 104, which is 480 sessions since 3 are on both machines, rendered with `show --json` by the binary built at `6ffe9e0` under the labels of that day, and by this change's binary under the labels of § Delivery.
+- **The indexed turns:** user turns from 2026-09-21 in the session index of each machine, searched for a line of the snippet's text. A session moved between the machines can be in both. The search finds words, not a paste: one laptop session (`45e38b5a`) holds the line in the middle of another paste, the reader finds no paste in it, and it is left out of the counts below. The two populations are otherwise the same sessions, but for `cc8ba647`, whose paste is older than the indexed turns.
 
 **Decision: name the files in `snippets`.** Settled.
-Basis, measured over the indexed turns: 12 and 11 sessions pasted `loopy-review-verify`, every one in a planlab worktree. Their working directories still exist for 3 and 2.
-Basis, from source: `mini-sync` in the dotfiles carries the `claude-steps` package to the mini, and planlab's primary checkout is at `~/dev/planlab/main` on both machines.
-Does not establish: how long a worktree lasts after its session ends.
+Basis, measured over the indexed turns: 11 and 11 sessions pasted `loopy-review-verify`, every one in a planlab worktree. Their working directories still exist for 3 and 2.
+Basis, from source: both machines stow the `claude-steps` package from their clone of the dotfiles, and planlab's primary checkout is at `~/dev/planlab/main` on both.
+Does not establish: how long a worktree lasts after its session ends, or that each stood while its session ran.
 
 **Decision: a file that does not exist holds no snippets.** Settled.
 Basis, from source: `loadSnippets` already skips a missing file, and the README says so for the default path. A machine without a project's checkout must still run.
 Limit: a misspelt path is not reported. Its pastes read as `you: "…"` lines, which is how every project paste reads today.
 
 **Decision: match a command row's name and arguments.** Settled.
-Basis, measured over the rendered window: 14 and 13 pastes of `loopy-review-verify`, of which 3 and 4 arrived as a slash command that loaded its skill. By session, over the indexed turns: text alone in 9 and 7, a command alone in 1 and 2, both in 2 and 2. Every arrival as text was wrapped.
+Basis, measured over the rendered window: 14 and 13 pastes of `loopy-review-verify`, of which 3 and 4 arrived as a slash command that loaded its skill. By session, over the indexed turns: text alone in 8 and 7, a command alone in 1 and 2, both in 2 and 2. Every arrival as text was wrapped, and the commands carry the snippet's line breaks in their arguments, so the number of lines does not decide which happens.
 Basis, measured: the global `review-verify` is one line and arrived as a command in each of its 6 and 3 pastes. `docs/EVIDENCE.md` counts it as pasted in no session, because the reader never matched a command.
 Limit: a command typed under a plugin's name (`/plugin:review`) is not matched to a snippet that opens with `/review`.
 
@@ -186,6 +188,10 @@ Basis, measured: planlab's file was rewritten on 2026-10-05, and the mini keeps 
 Fallback, if a retired wording must stay recognised: a file that holds it under the same key can be named in `snippets`. That needs no code.
 Limit: a prompt that holds a snippet's opening reads as `pasted` however it was entered. `loopy-closeout` is 45 characters, the words Qiushi also types by hand, and a command typed that way reads `pasted loopy-closeout` in the full history.
 
+**Decision: the board's columns close up before a row runs past the width.** Settled.
+Basis, measured on 2026-10-05: `pasted` adds 7 columns to a column that holds one. The live boards need 102 columns on the laptop, with no paste cell, and 117 on the mini, with `pasted` under `spec`; the popup gives about 121 and 151. A board of the seven labels with a paste under three of them needs 108 at two spaces and 98 at one.
+Limit: the cells still never give way, so a board whose cells are wider than the width at one space runs past it.
+
 **What the change moves, measured over the rendered window.**
 
 - **Events:** 14 and 13 pastes of `loopy-review-verify` in 12 and 11 sessions, 4 and 5 of `loopy-prompt-check` in 4 and 4, 5 and 2 of `loopy-closeout`, 6 and 3 of `review-verify`. 15 and 14 mention events are no longer shown: the same prompts, now pastes. No other event differs.
@@ -202,13 +208,15 @@ The build reports each obligation below by number: pinned, a test that goes red 
 
 Every test builds its rows with `internal/fixture` under a temporary `HOME`. The snippet texts in them are invented; none is a real snippet's wording.
 
-1. **Every named file is read, and a missing one holds nothing.** Observe: `config.Load` on a configuration that lists three files, one of them absent. Pinned by `TestSnippetFilesAreNamed` in `internal/config/config_test.go`.
+1. **Every named file is read, a missing one holds nothing, and a list is the whole of what is read.** Observe: `config.Load` on a configuration that lists three files, one of them absent, with the default file present and unnamed; and on no configuration at all, where the default file alone is read. Pinned by `TestSnippetFilesAreNamed` and `TestDefaultsWithNoFile` in `internal/config/config_test.go`.
 2. **A key worded twice is one key; an entry repeated is one entry; `snippets` is a path or a list of paths.** Observe: `Snippets.Pasted` on prompts holding either wording and both, and `Load` on a number, on a list holding one, and on a named file that does not decode. Pinned by `TestSnippetFilesAreNamed` and `TestSnippetsWantsPaths`.
-3. **A paste is recognised as text, as a command that loaded its skill, and as a command that loaded nothing.** Observe: a record loaded from fixture rows of the three shapes. Pinned by `TestAPasteArrivesAsAPromptOrAsItsCommand` in `internal/record/record_test.go`.
-4. **A paste typed as a command is not under a label that lists the command's skill, and is under any other that lists its key.** Observe: `LabelsOf`. Pinned by the same test and by `TestAnEventCanBeUnderSeveralLabels`.
-5. **A paste dates its label with the commits since, the cell says `pasted`, and a later load takes its place.** Observe: `Summarise`, and the board and the session view from a temporary home. Pinned by `TestAPasteDatesItsLabelUntilALoadFollows`, `TestAPasteFromAProjectsFile` in `cmd/claude-steps/board_test.go`, and the cell grammar in `TestBoard`.
+3. **A paste is recognised as text, as a command that loaded its skill, and as a command that loaded nothing**, whether the next prompt, a tool result or the transcript's end settles that command. Observe: a record loaded from fixture rows of those shapes. Pinned by `TestAPasteArrivesAsAPromptOrAsItsCommand` in `internal/record/record_test.go`.
+4. **A paste typed as a command is not under a label that lists the command's skill, and is under any other that lists its key.** Observe: `LabelsOf`, and `command` in `show --json`. Pinned by the same test, by `TestAnEventCanBeUnderSeveralLabels` and by `TestAPasteFromAProjectsFile`.
+5. **A paste dates its label with the commits since, the cell says `pasted` whether or not the label counts commits, a later load takes its place, and a paste after that load takes it back.** Observe: `Summarise`, and the board and the session view from a temporary home. Pinned by `TestAPasteDatesItsLabelUntilALoadFollows`, `TestAPasteFromAProjectsFile` in `cmd/claude-steps/board_test.go`, and the cell grammar in `TestBoard`.
 6. **Without the file, the same transcript reads as before.** Observe: the board and the session view after the named file is removed. Pinned by `TestAPasteFromAProjectsFile`.
 7. **The stands hold unloosened.** `TestOnlyTheNotesAreWritten`, `TestNoNetworkInTheBinary` and `TestOneReaderAndOneReadOnlyProcess` are unchanged and pass.
+8. **Equal words under different labels are separate lines.** Observe: the steps of a session that pasted a snippet as text and then as its command. Pinned by `TestRepeatedLinesAreOneLine` in `cmd/claude-steps/show_test.go`.
+9. **The board closes its columns to one space before a row runs past the width, with every label cell whole.** Observe: a board of seven labels with a paste under three of them, at 120 and at 100 columns. Pinned by `TestTheBoardClosesUpBeforeItRunsOver`.
 
 Limit: the fixtures prove the rule against the row shapes they build. That a real command row carries the snippet's words in `<command-args>` was read from three laptop transcripts on 2026-10-05 and is what the rendered window above measures.
 
@@ -216,7 +224,7 @@ Limit: the fixtures prove the rule against the row shapes they build. That a rea
 
 **Repository boundary.** Two repositories change. This repository carries the reader, the tests and this spec in one pull request. The dotfiles carry the `snippets` line and the label lines in `~/dotfiles/claude-steps/.config/claude-steps/config.toml`.
 
-**Order.** The new binary reaches a machine before the dotfiles change, or with it: the binary built at `6ffe9e0` refuses a list in `snippets` and every command then fails with that message. On the laptop that is `make install`, then the dotfiles edit. `mini-sync` copies the dotfiles tree and then the binary in one run, so the mini's commands can fail for the seconds between the two.
+**Order.** The new binary is on a machine before the dotfiles change is: the binary built at `6ffe9e0` refuses a list in `snippets`, and every command then fails with that message until the binary is built. Both machines are clones kept in step by `twin`, which pulls each repository and builds each tool on the machine that runs it. So this repository is merged, pulled and installed on a machine first, and the dotfiles change is pushed after that. On the laptop the binary was installed before the dotfiles file was edited.
 
 **The dotfiles change as built:**
 
