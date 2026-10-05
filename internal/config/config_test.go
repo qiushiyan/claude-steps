@@ -96,6 +96,86 @@ expand = "ok, go ahead"
 	}
 }
 
+// A project's own snippet file is named beside the global one. A file this
+// machine lacks holds no snippets, and a key that two files word differently
+// is recognised by either wording.
+func TestSnippetFilesAreNamed(t *testing.T) {
+	dir := home(t)
+	write(t, filepath.Join(dir, ".config", "claude-steps", "config.toml"),
+		`snippets = ["~/global.toml", "~/work/app/.tabtype.local.toml", "~/not/on/this/machine.toml"]`+"\n")
+	const (
+		reviewVerify = "/review full review. While you wait, prove the intended behaviour again with a spike."
+		checkGlobal  = "Review and revise the prompts this session touched against the rulebook, and report."
+		checkLocal   = "Review and revise the prompts this session's work touched against the project's guide."
+	)
+	write(t, filepath.Join(dir, "global.toml"), `
+[[snippets]]
+key = "review-verify"
+expand = "`+reviewVerify+`"
+
+[[snippets]]
+key = "prompt-check"
+expand = "`+checkGlobal+`"
+`)
+	write(t, filepath.Join(dir, "work", "app", ".tabtype.local.toml"), `
+[[snippets]]
+key = "app-review-verify"
+expand = """
+/review full review. While you wait, run app-verify
+on the local rig and compare against a baseline.
+"""
+
+[[snippets]]
+key = "prompt-check"
+expand = "`+checkLocal+`"
+
+[[snippets]]
+key = "review-verify"
+expand = "`+reviewVerify+`"
+`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for _, s := range cfg.Snippets {
+		keys = append(keys, s.Key)
+	}
+	if got := strings.Join(keys, " "); got != "review-verify prompt-check app-review-verify prompt-check" {
+		t.Errorf("snippets: %s", got)
+	}
+	for prompt, want := range map[string]string{
+		"<pasted_content id=\"1\">\n/review full review. While you wait, run app-verify\non the local rig and compare against a baseline.\n</pasted_content>": "app-review-verify",
+		checkGlobal:                     "prompt-check",
+		"and then: " + checkLocal:       "prompt-check",
+		checkLocal + "\n" + checkGlobal: "prompt-check",
+		reviewVerify:                    "review-verify",
+		"Review and revise the prompts": "",
+	} {
+		if got := strings.Join(cfg.Snippets.Pasted(prompt), " "); got != want {
+			t.Errorf("%q: pasted %q, want %q", prompt, got, want)
+		}
+	}
+}
+
+// `snippets` is a path or a list of paths, and a file that is there and
+// does not decode is an error that names it.
+func TestSnippetsWantsPaths(t *testing.T) {
+	dir := home(t)
+	file := filepath.Join(dir, ".config", "claude-steps", "config.toml")
+	for _, bad := range []string{"snippets = 3\n", "snippets = [\"~/a.toml\", 3]\n"} {
+		write(t, file, bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "want a path or a list of paths") {
+			t.Errorf("%q: got %v", bad, err)
+		}
+	}
+	write(t, file, "snippets = [\"~/a.toml\", \"~/b.toml\"]\n")
+	write(t, filepath.Join(dir, "b.toml"), "[[snippets]\nkey = 1\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), filepath.Join(dir, "b.toml")) {
+		t.Errorf("a file that does not decode: got %v", err)
+	}
+}
+
 func TestXDGConfigHome(t *testing.T) {
 	dir := home(t)
 	xdg := filepath.Join(dir, "xdg")

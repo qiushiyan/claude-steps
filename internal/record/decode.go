@@ -126,6 +126,7 @@ type slashCommand struct {
 	name     string
 	args     string
 	promptID string
+	pasted   []string // the snippets whose opening the command and its arguments hold
 }
 
 type prompt struct {
@@ -416,6 +417,11 @@ func (d *decoder) user(at time.Time, r row, text string, blocks []block) {
 		// such as /init answers with a meta prompt of its own, which does not
 		// open with the skill's line.
 		if follows && expansion {
+			// The paste comes first: it is the prompt, and the run is what
+			// the prompt did.
+			for _, key := range waiting.pasted {
+				d.add(Event{At: waiting.at, Kind: Snippet, Name: key, Command: waiting.name})
+			}
 			d.add(Event{At: waiting.at, Kind: Skill, Via: "slash", Name: waiting.name, Args: clip(waiting.args, argsMax)})
 			d.sig.slash.Primary++
 		}
@@ -433,7 +439,11 @@ func (d *decoder) user(at time.Time, r row, text string, blocks []block) {
 			if a := commandArgs.FindStringSubmatch(text); a != nil {
 				args = strings.Join(strings.Fields(a[1]), " ")
 			}
-			d.slash = &slashCommand{at: at, name: m[1], args: args, promptID: r.PromptID}
+			// A snippet that opens with a slash command arrives as that
+			// command when Claude Code does not wrap the paste, and its words
+			// are then the command's name and arguments.
+			d.slash = &slashCommand{at: at, name: m[1], args: args, promptID: r.PromptID,
+				pasted: d.snippets.Pasted("/" + m[1] + " " + args)}
 			return
 		}
 		if trimmed == "" {
@@ -450,10 +460,17 @@ func (d *decoder) user(at time.Time, r row, text string, blocks []block) {
 }
 
 // unexpanded handles a slash command that no expansion followed. That is a
-// built-in or a mod command, which is not an event, unless it names a
-// labelled skill: then the user asked for the skill and no load was seen,
-// which is shown as his words, like any other mention.
+// built-in or a mod command, which is not an event, unless it holds a
+// snippet's opening or names a labelled skill: then the user asked for the
+// skill and no load was seen, which is shown as the paste or as the words
+// typed, like any other prompt.
 func (d *decoder) unexpanded(c *slashCommand) {
+	for _, key := range c.pasted {
+		d.add(Event{At: c.at, Kind: Snippet, Name: key})
+	}
+	if len(c.pasted) > 0 {
+		return
+	}
 	name := bareSkill(c.name)
 	if d.labelled[name] {
 		d.add(Event{At: c.at, Kind: Mention, Names: []string{name}, Text: clip(strings.TrimSpace("/"+c.name+" "+c.args), openingWords)})

@@ -16,14 +16,19 @@ import (
 )
 
 var labels = []config.Label{
-	{Name: "review", Skills: []string{"review"}, Snippets: []string{"review-implementation"}, Jobs: []string{"review-"}, CountCommits: true},
-	{Name: "verify", Skills: []string{"pl-loopy-verify"}, CountCommits: true},
+	{Name: "review", Skills: []string{"review"}, Snippets: []string{"review-implementation", "app-review-verify"}, Jobs: []string{"review-"}, CountCommits: true},
+	{Name: "verify", Skills: []string{"pl-loopy-verify"}, Snippets: []string{"app-review-verify"}, CountCommits: true},
 	{Name: "prompts", Skills: []string{"prompt-engineering"}},
 }
 
+// app-review-verify opens with a slash command and asks for a second step,
+// as a project's own snippet does. reviewVerify is its text after "/review ".
 var snippets = config.Snippets{
 	{Key: "review-implementation", Head: "review the implementation against the spec, obligation by obligation, and report"},
+	{Key: "app-review-verify", Head: "/review full review. while you wait, run pl-loopy-verify on the local rig and co"},
 }
+
+const reviewVerify = "full review. While you wait, run pl-loopy-verify\non the local rig and compare against a baseline."
 
 const session = "11111111-1111-4111-8111-111111111111"
 
@@ -49,6 +54,9 @@ func lines(rec Record) []string {
 		}
 		if e.Kind == PR {
 			line += fmt.Sprintf(" | #%d", e.Number)
+		}
+		if e.Command != "" {
+			line += " | as /" + e.Command
 		}
 		if e.Dispatches > 0 {
 			line += fmt.Sprintf(" | ×%d", e.Dispatches)
@@ -494,6 +502,10 @@ func TestAnEventCanBeUnderSeveralLabels(t *testing.T) {
 		{Event{Kind: Skill, Name: "review", Failed: true}, "review docs"},
 		{Event{Kind: Read, Name: "update-docs"}, "docs"},
 		{Event{Kind: Snippet, Name: "handoff"}, "docs"},
+		// Typed as a slash command, a paste is that command's run under a
+		// label that lists the command's skill.
+		{Event{Kind: Snippet, Name: "handoff", Command: "plugin:review"}, ""},
+		{Event{Kind: Snippet, Name: "handoff", Command: "consult"}, "docs"},
 		{Event{Kind: Round, Name: "review-r1"}, "review rounds"},
 		{Event{Kind: Round, Name: "spike-r1"}, ""},
 		{Event{Kind: Mention, Names: []string{"update-docs"}}, "docs"},
@@ -527,6 +539,58 @@ func TestMentions(t *testing.T) {
 		"mention | review | /review codex",
 		"mention | pl-loopy-verify | then run pl-loopy-verify on it",
 	)
+}
+
+// A snippet that opens with a slash command arrives wrapped, as a prompt, or
+// bare, as that command. Either way it is a paste. As a command that loaded
+// its skill it is the run too, and the paste is then a step only under a
+// label the run is not under.
+func TestAPasteArrivesAsAPromptOrAsItsCommand(t *testing.T) {
+	tr := fixture.New()
+	tr.Prompt("<pasted_content id=\"4463\">\n/review " + reviewVerify + "\n</pasted_content>")
+	tr.Slash("review", reviewVerify, "/home/u/.claude/skills/review")
+	tr.SlashOnly("review", reviewVerify) // no expansion: the command loaded nothing
+	rec := load(t, tr)
+	ran := "skill | slash | review | full review. While you wait, run pl-loopy-verify on the local rig and compare against a baseline."
+	want(t, rec,
+		"snippet | app-review-verify",
+		"snippet | app-review-verify | as /review",
+		ran,
+		"snippet | app-review-verify",
+	)
+	var under []string
+	for _, e := range rec.Events {
+		under = append(under, strings.Join(LabelsOf(labels, e), "+"))
+	}
+	if got := strings.Join(under, " "); got != "review+verify verify review review+verify" {
+		t.Errorf("the labels each event is under: %s", got)
+	}
+}
+
+// A paste is a label's dated event, with the commits made since, until a
+// load follows it. A label whose skill the snippet names and that does not
+// list the snippet shows nothing of the prompt.
+func TestAPasteDatesItsLabelUntilALoadFollows(t *testing.T) {
+	tr := fixture.New()
+	tr.Prompt("/review " + reviewVerify + " Then follow skills/prompt-engineering/SKILL.md.")
+	tr.Bash(`git commit -q -m "one"`, "")
+	rec := load(t, tr)
+	want(t, rec, "snippet | app-review-verify", "commit | one")
+	states := Summarise(rec.Events, labels)
+	for _, st := range states[:2] {
+		if st.Latest == nil || st.Latest.Kind != Snippet || st.CommitsSince == nil || *st.CommitsSince != 1 {
+			t.Errorf("%s: %+v", st.Name, st)
+		}
+	}
+	if prompts := states[2]; prompts.Latest != nil {
+		t.Errorf("a prompt read as a paste was read for mentions too: %+v", prompts.Latest)
+	}
+
+	tr.SkillCall("pl-loopy-verify", "", "p", false)
+	rec = load(t, tr)
+	if verify := Summarise(rec.Events, labels)[1]; verify.Latest == nil || verify.Latest.Kind != Skill || *verify.CommitsSince != 0 {
+		t.Errorf("verify after the skill loaded: %+v", verify)
+	}
 }
 
 func TestMentionOnlyLabelHasNoCommitCount(t *testing.T) {

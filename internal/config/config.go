@@ -41,25 +41,55 @@ type Snippet struct {
 	Head string
 }
 
-// Snippets are the snippets a prompt can paste.
+// Snippets are the snippets a prompt can paste, from every file the
+// configuration names. A key that two files give two wordings stands twice.
 type Snippets []Snippet
 
-// Pasted returns the keys of the snippets whose opening the prompt holds.
+// Pasted returns the keys of the snippets whose opening the prompt holds,
+// each once.
 func (ss Snippets) Pasted(prompt string) []string {
 	var keys []string
 	flat := squash(prompt)
 	for _, s := range ss {
-		if strings.Contains(flat, s.Head) {
+		if strings.Contains(flat, s.Head) && !slices.Contains(keys, s.Key) {
 			keys = append(keys, s.Key)
 		}
 	}
 	return keys
 }
 
+// paths is one path or a list of them. `snippets` named one file before a
+// project's own could stand beside the global one, and a string still does.
+type paths []string
+
+func (p *paths) UnmarshalTOML(v any) error {
+	wrong := errors.New("snippets: want a path or a list of paths")
+	switch v := v.(type) {
+	case string:
+		*p = paths{v}
+	case []any:
+		out := paths{}
+		for _, e := range v {
+			path, ok := e.(string)
+			if !ok {
+				return wrong
+			}
+			out = append(out, path)
+		}
+		*p = out
+	default:
+		return wrong
+	}
+	return nil
+}
+
 type Config struct {
-	ProjectsDir string  `toml:"projects_dir"`
-	SnippetsSrc string  `toml:"snippets"`
-	Labels      []Label `toml:"label"`
+	ProjectsDir string `toml:"projects_dir"`
+	// SnippetFiles are the TabType files a prompt is matched against. They
+	// are named, never found from a session's directory: a session outlives
+	// its worktree, and would read differently once that is removed.
+	SnippetFiles paths   `toml:"snippets"`
+	Labels       []Label `toml:"label"`
 
 	// NotesDir is derived from the environment, never from the file.
 	NotesDir string   `toml:"-"`
@@ -79,8 +109,8 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("cannot find the home directory: %w", err)
 	}
 	cfg := Config{
-		ProjectsDir: "~/.claude/projects",
-		SnippetsSrc: "~/.config/tabtype/config.toml",
+		ProjectsDir:  "~/.claude/projects",
+		SnippetFiles: paths{"~/.config/tabtype/config.toml"},
 	}
 	path := filepath.Join(envDir("XDG_CONFIG_HOME", filepath.Join(home, ".config")), "claude-steps", "config.toml")
 	meta, err := toml.DecodeFile(path, &cfg)
@@ -102,9 +132,11 @@ func Load() (Config, error) {
 		}
 	}
 	cfg.ProjectsDir = expand(cfg.ProjectsDir, home)
-	cfg.SnippetsSrc = expand(cfg.SnippetsSrc, home)
+	for i, file := range cfg.SnippetFiles {
+		cfg.SnippetFiles[i] = expand(file, home)
+	}
 	cfg.NotesDir = filepath.Join(envDir("XDG_STATE_HOME", filepath.Join(home, ".local", "state")), "claude-steps", "notes")
-	cfg.Snippets, err = loadSnippets(cfg.SnippetsSrc)
+	cfg.Snippets, err = loadSnippets(cfg.SnippetFiles)
 	if err != nil {
 		return Config{}, err
 	}
@@ -144,29 +176,36 @@ func expand(path, home string) string {
 	return path
 }
 
-func loadSnippets(path string) (Snippets, error) {
-	var file struct {
-		Snippets []struct {
-			Key    string `toml:"key"`
-			Expand string `toml:"expand"`
-		} `toml:"snippets"`
-	}
-	if _, err := toml.DecodeFile(path, &file); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
+// loadSnippets reads the snippets of every file, in the order named. A file
+// that does not exist holds none: one configuration serves machines that lack
+// a project's checkout. A file that cannot be decoded is an error.
+func loadSnippets(files []string) (Snippets, error) {
 	var out Snippets
-	for _, s := range file.Snippets {
-		head := []rune(squash(s.Expand))
-		if s.Key == "" || len(head) < snippetMin {
-			continue
+	for _, path := range files {
+		var file struct {
+			Snippets []struct {
+				Key    string `toml:"key"`
+				Expand string `toml:"expand"`
+			} `toml:"snippets"`
 		}
-		if len(head) > snippetHead {
-			head = head[:snippetHead]
+		if _, err := toml.DecodeFile(path, &file); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("%s: %w", path, err)
 		}
-		out = append(out, Snippet{Key: s.Key, Head: string(head)})
+		for _, s := range file.Snippets {
+			head := []rune(squash(s.Expand))
+			if s.Key == "" || len(head) < snippetMin {
+				continue
+			}
+			if len(head) > snippetHead {
+				head = head[:snippetHead]
+			}
+			if snippet := (Snippet{Key: s.Key, Head: string(head)}); !slices.Contains(out, snippet) {
+				out = append(out, snippet)
+			}
+		}
 	}
 	return out, nil
 }

@@ -80,7 +80,10 @@ func belongs(l config.Label, e *Event) bool {
 	case Skill, Read:
 		return slices.Contains(l.Skills, bareSkill(e.Name))
 	case Snippet:
-		return slices.Contains(l.Snippets, e.Name)
+		// A paste that arrived as a slash command is that command's run under
+		// a label that lists the command's skill: one prompt, one line there.
+		ran := e.Command != "" && slices.Contains(l.Skills, bareSkill(e.Command))
+		return slices.Contains(l.Snippets, e.Name) && !ran
 	case Mention:
 		return slices.ContainsFunc(e.Names, func(n string) bool { return slices.Contains(l.Skills, n) })
 	case Round:

@@ -46,8 +46,9 @@ under the same name is counted on the later one ("dispatched 2 times").
 
 On the board a label's cell is the time of its latest event ("11m", "2d");
 "+2" counts the commits made since that event started, "read" means a skill's
-file was read and not loaded, "named" means a prompt named the skill and
-nothing more was seen. "no collect" holds the time of the newest round with no
+file was read and not loaded, "pasted" means a snippet was pasted and nothing
+under the label followed, "named" means a prompt named the skill and nothing
+more was seen. "no collect" holds the time of the newest round with no
 collect seen, and "×2" when there are two. "!" before a title says the
 transcript was read with something missing; the session view says what.
 

@@ -2,10 +2,13 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qiushiyan/claude-steps/internal/fixture"
 	"github.com/qiushiyan/claude-steps/internal/panes"
@@ -16,7 +19,7 @@ import (
 const when = `(now|\d+(s|m|h|d|w|mo|y))`
 
 var (
-	cell        = regexp.MustCompile(`^(·|(read )?` + when + `( \+\d+)?|named ` + when + `)$`)
+	cell        = regexp.MustCompile(`^(·|((read|pasted) )?` + when + `( \+\d+)?|named ` + when + `)$`)
 	uncollected = regexp.MustCompile(`^(·|` + when + `( ×\d+)?)$`)
 	columns     = regexp.MustCompile(` {2,}`)
 )
@@ -61,6 +64,65 @@ func TestBoard(t *testing.T) {
 	if !strings.HasPrefix(idRows[0], "\t\tpane") || !strings.HasPrefix(idRows[1], "%1\t"+worked+"\twork:1.1") {
 		t.Errorf("--ids rows:\n%s\n%s", idRows[0], idRows[1])
 	}
+}
+
+// A project keeps snippets of its own in a file the configuration names. A
+// paste from it is the dated event of each label that lists its key, with the
+// commits made since, and the cell says it is a paste: a request never
+// stands as a run. Without the file the same transcript reads as it did
+// before, as a prompt that names a skill.
+func TestAPasteFromAProjectsFile(t *testing.T) {
+	w := newWorld(t)
+	local := filepath.Join(w.home, "work", "app", ".tabtype.local.toml")
+	labels := strings.Replace(configFile, `skills = ["pl-loopy-verify"]`, `skills = ["pl-loopy-verify"]`+"\n"+`snippets = ["app-review-verify"]`, 1)
+	labels = strings.Replace(labels, `["review-implementation"]`, `["review-implementation", "app-review-verify"]`, 1)
+	fixture.WriteFile(t, filepath.Join(w.home, ".config", "claude-steps", "config.toml"),
+		[]byte(`snippets = ["~/.config/tabtype/config.toml", "~/work/app/.tabtype.local.toml"]`+"\n"+labels))
+	fixture.WriteFile(t, local, []byte(`
+[[snippets]]
+key = "app-review-verify"
+expand = """
+/review full review. While you wait, run pl-loopy-verify
+on the local rig and compare against a baseline.
+"""
+`))
+	const pasting = "ffffffff-6666-4666-8666-666666666666"
+	const words = "full review. While you wait, run pl-loopy-verify\non the local rig and compare against a baseline."
+	tr := fixture.New().Title("Rows keep their order")
+	tr.Prompt("<pasted_content id=\"4463\">\n/review " + words + "\n</pasted_content>")
+	tr.Bash(`git commit -q -m "rows keep their order"`, "")
+	tr.At(fixture.Start.Add(time.Hour))
+	tr.Slash("review", words, "/home/u/.claude/skills/review")
+	tr.Bash(`git commit -q -m "after the second request"`, "")
+	tr.Write(t, w.projects, "-work-app", pasting)
+	w.panes = []panes.Pane{{ID: "%7", Where: "work:4.1", SessionID: pasting}}
+
+	// review holds the command's run, verify the paste that came with it.
+	row := strings.Split(strings.TrimRight(w.ok("board"), "\n"), "\n")[1]
+	cells := columns.Split(row, -1)
+	if got := cells[2:4]; !slices.Equal(got, []string{"2h +1", "pasted 2h +1"}) {
+		t.Errorf("review and verify: %q in %q", got, row)
+	}
+	for _, c := range cells[2:5] {
+		if !cell.MatchString(c) {
+			t.Errorf("cell %q is not a date", c)
+		}
+	}
+	contains(t, w.ok("show", "%7"),
+		"review    2 hours ago   1 commit since   /review full review.",
+		"verify    2 hours ago   1 commit since   pasted app-review-verify",
+		"  verify          2h   pasted app-review-verify\n",
+		"  review          2h   /review  full review.",
+		"  review verify   3h   pasted app-review-verify\n",
+	)
+
+	if err := os.Remove(local); err != nil {
+		t.Fatal(err)
+	}
+	contains(t, w.ok("board"), "2h +1   named 3h")
+	out := w.ok("show", "%7")
+	contains(t, out, `you: "/review full review. While you wait, run pl-loopy-verify on…"`)
+	lacks(t, out, "pasted")
 }
 
 // Colour is the same text painted: with the escapes removed it is the plain

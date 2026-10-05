@@ -12,9 +12,11 @@ import (
 // labelCell is a label's board cell: when its latest event happened, with
 // "+N" for the commits made since where the label counts them. It is one of
 //
-//	·   <time>   <time> +N   read <time>   read <time> +N   named <time>
+//	·   <time>   <time> +N   read <time>   read <time> +N
+//	pasted <time>   pasted <time> +N   named <time>
 //
-// and nothing else: a cell carries a date, never a judgement.
+// and nothing else: a cell carries a date, never a judgement. A read and a
+// paste are said, so a request never stands as a run.
 func (v View) labelCell(l record.LabelState) cell {
 	if l.Latest == nil {
 		return of(faint, nothing)
@@ -25,6 +27,8 @@ func (v View) labelCell(l record.LabelState) cell {
 		return of(plain, "named "+when)
 	case record.Read:
 		when = "read " + when
+	case record.Snippet:
+		when = "pasted " + when
 	}
 	c := of(plain, when)
 	if n := l.CommitsSince; n != nil {
