@@ -117,27 +117,38 @@ func (v View) Board(w io.Writer, sessions []Session, ids bool) {
 	if noteW > 0 {
 		noteW = max(noteW, width("note"))
 	}
+	gap := boardGap
 	if v.Width > 0 {
 		// Every other column keeps its width. The title gives way first, then
-		// the note, and a note with no room left goes.
-		rest := starts(fixed, boardGap)[len(header)]
-		over := func() int {
-			total := rest + titleW
-			if noteW > 0 {
-				total += boardGap + noteW
+		// the note, and a note with no room left goes. When the cells that
+		// never give way still leave the title less than its floor, the
+		// columns close up to one space and the fit is made again: a row
+		// that runs past the width loses its right end in the popup.
+		wantTitle, wantNote := titleW, noteW
+		for _, gap = range []int{boardGap, 1} {
+			titleW, noteW = wantTitle, wantNote
+			rest := starts(fixed, gap)[len(header)]
+			over := func() int {
+				total := rest + titleW
+				if noteW > 0 {
+					total += gap + noteW
+				}
+				return total - v.Width
 			}
-			return total - v.Width
-		}
-		shrink := func(w *int, floor int) {
-			if n := over(); n > 0 && *w > floor {
-				*w = max(floor, *w-n)
+			shrink := func(w *int, floor int) {
+				if n := over(); n > 0 && *w > floor {
+					*w = max(floor, *w-n)
+				}
 			}
-		}
-		shrink(&titleW, 20)
-		shrink(&noteW, 16)
-		shrink(&titleW, 12)
-		if over() > 0 {
-			noteW = 0
+			shrink(&titleW, 20)
+			shrink(&noteW, 16)
+			shrink(&titleW, 12)
+			if over() > 0 {
+				noteW = 0
+			}
+			if over() <= 0 {
+				break
+			}
 		}
 	}
 
@@ -153,7 +164,7 @@ func (v View) Board(w io.Writer, sessions []Session, ids bool) {
 		}
 		table = append(table, r.cells)
 	}
-	for i, line := range v.lay(table, boardGap) {
+	for i, line := range v.lay(table, gap) {
 		if ids {
 			pane, id := "", ""
 			if i > 0 {

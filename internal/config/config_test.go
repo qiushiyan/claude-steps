@@ -38,6 +38,13 @@ func TestDefaultsWithNoFile(t *testing.T) {
 	if len(cfg.Labels) != 0 || len(cfg.Snippets) != 0 {
 		t.Errorf("the binary ships labels or snippets: %+v", cfg)
 	}
+
+	// With no `snippets` key the global TabType file is the one read.
+	write(t, filepath.Join(dir, ".config", "tabtype", "config.toml"),
+		"[[snippets]]\nkey = \"global-only\"\nexpand = \"Read the plan again and say what it leaves undecided.\"\n")
+	if cfg, err = Load(); err != nil || len(cfg.Snippets) != 1 || cfg.Snippets[0].Key != "global-only" {
+		t.Errorf("the default snippet file: %+v, %v", cfg.Snippets, err)
+	}
 }
 
 func TestLabelsPathsAndSnippets(t *testing.T) {
@@ -108,6 +115,9 @@ func TestSnippetFilesAreNamed(t *testing.T) {
 		checkGlobal  = "Review and revise the prompts this session touched against the rulebook, and report."
 		checkLocal   = "Review and revise the prompts this session's work touched against the project's guide."
 	)
+	// A list is the whole of what is read: the default file is not added to it.
+	write(t, filepath.Join(dir, ".config", "tabtype", "config.toml"),
+		"[[snippets]]\nkey = \"global-only\"\nexpand = \"Read the plan again and say what it leaves undecided.\"\n")
 	write(t, filepath.Join(dir, "global.toml"), `
 [[snippets]]
 key = "review-verify"

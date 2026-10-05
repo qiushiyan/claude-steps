@@ -242,12 +242,14 @@ func steps(all []line) []line {
 }
 
 // collapse makes a run of equal lines one line, dated at its last, with the
-// count: a scheduled command fires the same line many times.
+// count: a scheduled command fires the same line many times. Lines are equal
+// when their labels are too: the same words under another label are another
+// step.
 func collapse(lines []line) []line {
 	var out []line
 	for _, l := range lines {
 		l.times = 1
-		if n := len(out); n > 0 && l.kind != record.Note && !l.count && out[n-1].kind == l.kind && out[n-1].text == l.text {
+		if n := len(out); n > 0 && l.kind != record.Note && !l.count && out[n-1].kind == l.kind && out[n-1].text == l.text && slices.Equal(out[n-1].labels, l.labels) {
 			out[n-1].at = l.at
 			out[n-1].times++
 			continue

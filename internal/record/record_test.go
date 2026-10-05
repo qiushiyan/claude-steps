@@ -549,7 +549,13 @@ func TestAPasteArrivesAsAPromptOrAsItsCommand(t *testing.T) {
 	tr := fixture.New()
 	tr.Prompt("<pasted_content id=\"4463\">\n/review " + reviewVerify + "\n</pasted_content>")
 	tr.Slash("review", reviewVerify, "/home/u/.claude/skills/review")
-	tr.SlashOnly("review", reviewVerify) // no expansion: the command loaded nothing
+	// No expansion: the command loaded nothing. What settles it is the next
+	// prompt, a tool result, or the transcript's end.
+	tr.SlashOnly("review", reviewVerify)
+	tr.Prompt("thanks")
+	tr.SlashOnly("review", reviewVerify)
+	tr.Bash("ls", "")
+	tr.SlashOnly("review", reviewVerify)
 	rec := load(t, tr)
 	ran := "skill | slash | review | full review. While you wait, run pl-loopy-verify on the local rig and compare against a baseline."
 	want(t, rec,
@@ -557,9 +563,11 @@ func TestAPasteArrivesAsAPromptOrAsItsCommand(t *testing.T) {
 		"snippet | app-review-verify | as /review",
 		ran,
 		"snippet | app-review-verify",
+		"snippet | app-review-verify",
+		"snippet | app-review-verify",
 	)
 	var under []string
-	for _, e := range rec.Events {
+	for _, e := range rec.Events[:4] {
 		under = append(under, strings.Join(LabelsOf(labels, e), "+"))
 	}
 	if got := strings.Join(under, " "); got != "review+verify verify review review+verify" {
@@ -590,6 +598,16 @@ func TestAPasteDatesItsLabelUntilALoadFollows(t *testing.T) {
 	rec = load(t, tr)
 	if verify := Summarise(rec.Events, labels)[1]; verify.Latest == nil || verify.Latest.Kind != Skill || *verify.CommitsSince != 0 {
 		t.Errorf("verify after the skill loaded: %+v", verify)
+	}
+
+	// Asked again in a session that holds the skill, the paste is the later
+	// event and the count runs from it.
+	tr.Bash(`git commit -q -m "two"`, "")
+	tr.Prompt("/review " + reviewVerify)
+	tr.Bash(`git commit -q -m "three"`, "")
+	rec = load(t, tr)
+	if verify := Summarise(rec.Events, labels)[1]; verify.Latest == nil || verify.Latest.Kind != Snippet || *verify.CommitsSince != 1 {
+		t.Errorf("verify after a second paste: %+v", verify)
 	}
 }
 

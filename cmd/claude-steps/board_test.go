@@ -66,16 +66,23 @@ func TestBoard(t *testing.T) {
 	}
 }
 
-// A project keeps snippets of its own in a file the configuration names. A
-// paste from it is the dated event of each label that lists its key, with the
-// commits made since, and the cell says it is a paste: a request never
-// stands as a run. Without the file the same transcript reads as it did
-// before, as a prompt that names a skill.
-func TestAPasteFromAProjectsFile(t *testing.T) {
-	w := newWorld(t)
+// reviewVerify is the text of a project's snippet after the "/review " it
+// opens with, and promptCheck a second one that opens with no command.
+const (
+	reviewVerify = "full review. While you wait, run pl-loopy-verify\non the local rig and compare against a baseline."
+	promptCheck  = "Review and revise the prompts this session's work touched against the project's guide."
+)
+
+// projectSnippets names a project's own snippet file in the world's
+// configuration, beside the global one, and lists its keys: the first under
+// review and verify, the second under prompts, which counts no commits. It
+// returns the file.
+func projectSnippets(t *testing.T, w *world) string {
+	t.Helper()
 	local := filepath.Join(w.home, "work", "app", ".tabtype.local.toml")
 	labels := strings.Replace(configFile, `skills = ["pl-loopy-verify"]`, `skills = ["pl-loopy-verify"]`+"\n"+`snippets = ["app-review-verify"]`, 1)
 	labels = strings.Replace(labels, `["review-implementation"]`, `["review-implementation", "app-review-verify"]`, 1)
+	labels = strings.Replace(labels, `skills = ["prompt-engineering"]`, `skills = ["prompt-engineering"]`+"\n"+`snippets = ["app-prompt-check"]`, 1)
 	fixture.WriteFile(t, filepath.Join(w.home, ".config", "claude-steps", "config.toml"),
 		[]byte(`snippets = ["~/.config/tabtype/config.toml", "~/work/app/.tabtype.local.toml"]`+"\n"+labels))
 	fixture.WriteFile(t, local, []byte(`
@@ -85,23 +92,39 @@ expand = """
 /review full review. While you wait, run pl-loopy-verify
 on the local rig and compare against a baseline.
 """
+
+[[snippets]]
+key = "app-prompt-check"
+expand = "`+promptCheck+`"
 `))
+	return local
+}
+
+// A project keeps snippets of its own in a file the configuration names. A
+// paste from it is the dated event of each label that lists its key, with the
+// commits made since where the label counts them, and the cell says it is a
+// paste: a request never stands as a run. Without the file the same
+// transcript reads as it did before, as a prompt that names a skill.
+func TestAPasteFromAProjectsFile(t *testing.T) {
+	w := newWorld(t)
+	local := projectSnippets(t, w)
 	const pasting = "ffffffff-6666-4666-8666-666666666666"
-	const words = "full review. While you wait, run pl-loopy-verify\non the local rig and compare against a baseline."
 	tr := fixture.New().Title("Rows keep their order")
-	tr.Prompt("<pasted_content id=\"4463\">\n/review " + words + "\n</pasted_content>")
+	tr.Prompt("<pasted_content id=\"4463\">\n/review " + reviewVerify + "\n</pasted_content>")
 	tr.Bash(`git commit -q -m "rows keep their order"`, "")
 	tr.At(fixture.Start.Add(time.Hour))
-	tr.Slash("review", words, "/home/u/.claude/skills/review")
+	tr.Slash("review", reviewVerify, "/home/u/.claude/skills/review")
+	tr.Prompt(promptCheck)
 	tr.Bash(`git commit -q -m "after the second request"`, "")
 	tr.Write(t, w.projects, "-work-app", pasting)
 	w.panes = []panes.Pane{{ID: "%7", Where: "work:4.1", SessionID: pasting}}
 
-	// review holds the command's run, verify the paste that came with it.
+	// review holds the command's run and verify the paste that came with it;
+	// prompts counts no commits, and its paste is said all the same.
 	row := strings.Split(strings.TrimRight(w.ok("board"), "\n"), "\n")[1]
 	cells := columns.Split(row, -1)
-	if got := cells[2:4]; !slices.Equal(got, []string{"2h +1", "pasted 2h +1"}) {
-		t.Errorf("review and verify: %q in %q", got, row)
+	if got := cells[2:5]; !slices.Equal(got, []string{"2h +1", "pasted 2h +1", "pasted 2h"}) {
+		t.Errorf("review, verify and prompts: %q in %q", got, row)
 	}
 	for _, c := range cells[2:5] {
 		if !cell.MatchString(c) {
@@ -115,6 +138,8 @@ on the local rig and compare against a baseline.
 		"  review          2h   /review  full review.",
 		"  review verify   3h   pasted app-review-verify\n",
 	)
+	// The paste names the skill its own command ran.
+	contains(t, w.ok("show", "%7", "--json"), `"name": "app-review-verify",`+"\n"+`      "command": "review"`)
 
 	if err := os.Remove(local); err != nil {
 		t.Fatal(err)
@@ -123,6 +148,51 @@ on the local rig and compare against a baseline.
 	out := w.ok("show", "%7")
 	contains(t, out, `you: "/review full review. While you wait, run pl-loopy-verify on…"`)
 	lacks(t, out, "pasted")
+}
+
+// The label cells never give way, and a cell that says what its event is
+// takes more room than a date. When the cells leave the title less than its
+// floor, the columns close up to one space before a row runs past the width.
+func TestTheBoardClosesUpBeforeItRunsOver(t *testing.T) {
+	w := newWorld(t)
+	var labels strings.Builder
+	for _, name := range []string{"consult", "spec", "review", "verify", "docs", "pr-review", "prompts"} {
+		fmt.Fprintf(&labels, "[[label]]\nname = %q\nsnippets = [%q]\ncount_commits = %t\n\n", name, "ask-"+name, name == "verify")
+	}
+	fixture.WriteFile(t, filepath.Join(w.home, ".config", "claude-steps", "config.toml"), []byte(labels.String()))
+	const ask = " the session to go over the work once more and report what it finds."
+	var snippets strings.Builder
+	tr := fixture.New().Title("Rows keep their order")
+	for _, name := range []string{"spec", "verify", "prompts"} {
+		fmt.Fprintf(&snippets, "[[snippets]]\nkey = %q\nexpand = %q\n\n", "ask-"+name, "For "+name+": ask"+ask)
+		tr.Prompt("For " + name + ": ask" + ask)
+	}
+	fixture.WriteFile(t, filepath.Join(w.home, ".config", "tabtype", "config.toml"), []byte(snippets.String()))
+	tr.Bash(`git commit -q -m "rows keep their order"`, "")
+	id := fixture.ID("abab7878")
+	tr.Write(t, w.projects, "p", id)
+	w.panes = []panes.Pane{{ID: "%7", Where: "work:4.1", SessionID: id}}
+
+	board := func(cols int) []string {
+		t.Helper()
+		w.env = map[string]string{"COLUMNS": fmt.Sprint(cols)}
+		out := strings.Split(strings.TrimRight(w.ok("board"), "\n"), "\n")
+		for _, row := range out {
+			if screen.StringWidth(row) > cols {
+				t.Errorf("at %d columns a row takes %d:\n%s", cols, screen.StringWidth(row), row)
+			}
+		}
+		return out
+	}
+	// Room for the cells and a title: the columns stand two spaces apart.
+	out := board(120)
+	contains(t, out[0], "consult  spec       review  verify        docs  pr-review  prompts    no collect  PR")
+	contains(t, out[1], "·        pasted 3h  ·       pasted 3h +1  ·     ·          pasted 3h  ·           ·")
+	// No room at two spaces: one, with every cell whole and under its header.
+	out = board(100)
+	contains(t, out[0], "consult spec      review verify       docs pr-review prompts   no collect PR")
+	// The title takes back what closing up leaves over.
+	contains(t, out[1], "Rows keep the… ·       pasted 3h ·      pasted 3h +1 ·    ·         pasted 3h ·          ·")
 }
 
 // Colour is the same text painted: with the escapes removed it is the plain

@@ -331,6 +331,18 @@ func TestRepeatedLinesAreOneLine(t *testing.T) {
 	tr.Slash("review", "codex", "/home/u/.claude/skills/review")
 	tr.Write(t, w.projects, "p", id)
 	contains(t, w.ok("show", id), "/review  codex\n                1 commit\n  review   3h   /review  codex  (3 times)\n")
+
+	// Equal words under other labels are another line. A paste typed as its
+	// own command is under verify alone, and the same paste as text is under
+	// review too.
+	projectSnippets(t, w)
+	tr = fixture.New()
+	tr.Prompt("/review " + reviewVerify)
+	tr.Slash("review", reviewVerify, "/home/u/.claude/skills/review")
+	tr.Write(t, w.projects, "p", id)
+	out = w.ok("show", id)
+	contains(t, out, "  verify          3h   pasted app-review-verify\n  review verify   3h   pasted app-review-verify\n")
+	lacks(t, out, "times)")
 }
 
 // A round dispatched here with no collect in the transcript is listed under
