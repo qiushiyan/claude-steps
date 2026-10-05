@@ -6,10 +6,10 @@ import (
 	"github.com/qiushiyan/claude-steps/internal/shell"
 )
 
-// This file reads a simple command's words as git or envoy would: which
-// commands are a commit, an envoy run or an envoy collect, and what each
-// names. It knows no transcript row; internal/shell has already said what
-// ran.
+// This file reads a simple command's words as git, envoy or cat would: which
+// commands are a commit, an envoy run, an envoy collect or a skill's file
+// printed, and what each names. It knows no transcript row; internal/shell
+// has already said what ran.
 
 type commitCommand struct {
 	subject string
@@ -136,4 +136,28 @@ func envoyJob(argv []string, sub string) (string, bool) {
 		return argv[i], true
 	}
 	return "", false
+}
+
+// skillsPrinted returns the skills whose file a simple command prints whole
+// into the call's output: the operands of `cat` that are a skill's file,
+// read from the directory the command runs in. That is the model loading a
+// skill without the Skill or the Read tool. A `cat` whose output a pipe or a
+// file takes shows the model no file, and sed, head and grep show a passage
+// of one, which is a lookup, so none of them is a read. A name the text does
+// not spell out, a variable or a glob, names no skill.
+func skillsPrinted(argv []string, c shell.Command) []string {
+	if len(argv) < 2 || argv[0] != "cat" || c.Captured {
+		return nil
+	}
+	var names []string
+	for _, arg := range argv[1:] {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		m := skillFile.FindStringSubmatch(shell.Resolve(c.Dir, arg))
+		if m != nil && !strings.ContainsAny(m[1], "$`*?[{") {
+			names = append(names, m[1])
+		}
+	}
+	return names
 }

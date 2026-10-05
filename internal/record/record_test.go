@@ -299,6 +299,68 @@ func TestLaterReadOutranksAnEarlierRun(t *testing.T) {
 	}
 }
 
+// A skill's file printed whole by a Bash call is the model reading it, as a
+// Read call is. Asked in prose to run a skill, the model as often runs `cat`
+// on its file as it calls a tool, and the prompt was then the only trace.
+func TestASkillFilePrintedByCatIsARead(t *testing.T) {
+	tr := fixture.New()
+	tr.Prompt("/review codex full, and run pl-loopy-verify while you wait")
+	tr.SkillCall("review", "codex full", "p", false)
+	tr.Bash("wc -c .agents/skills/pl-loopy-verify/SKILL.md && cat .agents/skills/pl-loopy-verify/SKILL.md", "9000 SKILL.md\n---\nname: pl-loopy-verify")
+	tr.Bash(`git commit -qm "fix"`, "")
+	rec := load(t, tr)
+	want(t, rec,
+		"mention | review+pl-loopy-verify | /review codex full, and run pl-loopy-verify while you wait",
+		"skill | tool | review | codex full",
+		"read | pl-loopy-verify",
+		"commit | fix",
+	)
+	if verify := Summarise(rec.Events, labels)[1]; verify.Latest == nil || verify.Latest.Kind != Read || verify.CommitsSince == nil || *verify.CommitsSince != 1 {
+		t.Errorf("verify: %+v", verify)
+	}
+
+	for src, want := range map[string]string{
+		// Read from where the command runs, with cat's own options.
+		"cd ~/.claude/skills/review && cat -n SKILL.md BRIEF-TEMPLATE.md": "review",
+		// The file is looked for in two places: one read, whichever printed.
+		"cat .claude/skills/review/SKILL.md 2>/dev/null || cat .agents/skills/review/SKILL.md": "review",
+		"cat skills/review/SKILL.md; echo ====; cat skills/prompt-engineering/SKILL.md":        "review prompt-engineering",
+		"S=review; cat .agents/skills/$S/SKILL.md":                                             "review",
+		// Two copies of one skill printed by a call are one read.
+		"cat ~/.claude/skills/review/SKILL.md; cat .agents/skills/review/SKILL.md": "review",
+		// A passage looked up is not the file read.
+		"grep -n verdict skills/review/SKILL.md; sed -n 40,60p skills/review/SKILL.md; head -20 skills/review/SKILL.md": "",
+		"cat skills/review/SKILL.md | sed -n 15,80p": "",
+		// What the call's output does not hold.
+		"cat skills/review/SKILL.md > /tmp/copy.md; wc -l /tmp/copy.md": "",
+		"body=$(cat skills/review/SKILL.md)":                            "",
+		// A command that may not have run.
+		"test -f skills/review/SKILL.md || cat ~/.claude/skills/review/SKILL.md": "",
+		// A name the text does not give.
+		`cat skills/*/SKILL.md; cat "skills/$1/SKILL.md"`: "",
+		"cat skills/review/REFERENCE.md":                  "",
+	} {
+		var got []string
+		for _, e := range load(t, fixture.New().Bash(src, "text")).Events {
+			got = append(got, string(e.Kind)+" "+e.Name)
+		}
+		expected := []string{}
+		for _, name := range strings.Fields(want) {
+			expected = append(expected, "read "+name)
+		}
+		if strings.Join(got, ", ") != strings.Join(expected, ", ") {
+			t.Errorf("%s\n   got %q\n  want %q", src, got, expected)
+		}
+	}
+
+	// A call that returned an error, or one whose output never came back.
+	unseen := fixture.New()
+	unseen.BashError("cat skills/review/SKILL.md", "cat: skills/review/SKILL.md: No such file or directory")
+	unseen.BashBackground("cat skills/review/SKILL.md")
+	unseen.BashPending("cat skills/review/SKILL.md")
+	want(t, load(t, unseen))
+}
+
 // Obligation 7.
 func TestPullRequests(t *testing.T) {
 	tr := fixture.New()

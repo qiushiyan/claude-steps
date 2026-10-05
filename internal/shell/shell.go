@@ -19,7 +19,9 @@
 //   - a variable assigned on a branch decided at run time holds inside the
 //     branch, and reads as its source text after it;
 //   - a command that runs only on a branch decided at run time is marked
-//     Guarded.
+//     Guarded;
+//   - a command whose standard output feeds a pipe, a file or a substitution
+//     is marked Captured.
 //
 // It does not expand globs, aliases or anything that needs the process
 // environment.
@@ -51,6 +53,11 @@ type Command struct {
 	// or loop, or in a background job. A command after && is not guarded: if
 	// it is skipped, the && list fails.
 	Guarded bool
+	// Captured is set when what the command prints is not in the text's own
+	// output: it is piped into another command, redirected to a file, or
+	// taken by a command or process substitution. A redirection of standard
+	// error alone captures nothing.
+	Captured bool
 }
 
 // Argv returns the words after leading variable assignments and wrapper
@@ -111,6 +118,7 @@ type walker struct {
 	out   []Command
 	depth int
 	guard int // how many guarded branches enclose the statement walked
+	taken int // how many pipes, redirections and substitutions take its output
 }
 
 // scope is what a shell holds that a subshell gets a copy of: where it is,
@@ -164,6 +172,9 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 			}
 		case r.Op == syntax.WordHdoc && r.Word != nil:
 			in = input{w.text(sc, r.Word, unquoted), true}
+		case takesOutput(r):
+			w.taken++
+			defer func() { w.taken-- }()
 		}
 	}
 	switch c := s.Cmd.(type) {
@@ -172,7 +183,9 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 	case *syntax.BinaryCmd:
 		switch c.Op {
 		case syntax.Pipe, syntax.PipeAll:
+			w.taken++
 			w.stmt(c.X, sc.fork(), in)
+			w.taken--
 			w.stmt(c.Y, sc.fork(), in)
 		case syntax.OrStmt:
 			w.stmt(c.X, sc, in)
@@ -238,6 +251,19 @@ func (w *walker) stmt(s *syntax.Stmt, sc *scope, in input) {
 		}
 		w.assign(sc, c.Args)
 	}
+}
+
+// takesOutput reports whether a redirection sends standard output to a file:
+// `> f`, `>> f`, `1> f` and `&> f`, and not `2> f` or `>&2`, which leave it
+// where it was or on standard error, both of which the call returns.
+func takesOutput(r *syntax.Redirect) bool {
+	switch r.Op {
+	case syntax.RdrOut, syntax.AppOut, syntax.RdrClob, syntax.AppClob:
+		return r.N == nil || r.N.Value == "1"
+	case syntax.RdrAll, syntax.RdrAllClob, syntax.AppAll, syntax.AppAllClob:
+		return true
+	}
+	return false
 }
 
 // guarded walks the branches of a choice made at run time: the arms of an if
@@ -320,7 +346,7 @@ func (w *walker) call(c *syntax.CallExpr, sc *scope, in input) {
 	if words[at] == "cd" && len(words) == at+2 && words[at+1] != "-" {
 		sc.dir = Resolve(sc.dir, words[at+1])
 	}
-	w.out = append(w.out, Command{Words: words, Stdin: in.body, HasStdin: in.set, Dir: sc.dir, Guarded: w.guard > 0})
+	w.out = append(w.out, Command{Words: words, Stdin: in.body, HasStdin: in.set, Dir: sc.dir, Guarded: w.guard > 0, Captured: w.taken > 0})
 }
 
 // assign records variables whose values the text sets. The caller has
@@ -343,18 +369,22 @@ func (w *walker) assign(sc *scope, list []*syntax.Assign) {
 
 // substitutions walks the commands inside the command and process
 // substitutions of a word, a test or a loop's word list. Each runs in a
-// scope of its own.
+// scope of its own, and what it prints goes to the word.
 func (w *walker) substitutions(n syntax.Node, sc *scope) {
 	syntax.Walk(n, func(n syntax.Node) bool {
+		var inner []*syntax.Stmt
 		switch s := n.(type) {
 		case *syntax.CmdSubst:
-			w.stmts(s.Stmts, sc.fork(), input{})
-			return false
+			inner = s.Stmts
 		case *syntax.ProcSubst:
-			w.stmts(s.Stmts, sc.fork(), input{})
-			return false
+			inner = s.Stmts
+		default:
+			return true
 		}
-		return true
+		w.taken++
+		w.stmts(inner, sc.fork(), input{})
+		w.taken--
+		return false
 	})
 }
 

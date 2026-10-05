@@ -118,6 +118,7 @@ type bashCall struct {
 	mentionsCommit bool
 	envoy          roundCall
 	createsPR      bool
+	reads          []string // the skills whose file the call prints
 }
 
 type slashCommand struct {
@@ -323,6 +324,7 @@ func (d *decoder) assistant(at time.Time, blocks []block) bool {
 				ok = false
 				continue
 			}
+			// A Bash call that prints the file is the same read: bashCommand.
 			if m := skillFile.FindStringSubmatch(in.FilePath); m != nil {
 				d.reads[b.ID] = Event{At: at, Kind: Read, Name: m[1]}
 			}
@@ -332,9 +334,10 @@ func (d *decoder) assistant(at time.Time, blocks []block) bool {
 }
 
 // bashCommand records what a Bash call ran. Round events are added now, at
-// the dispatch; commits wait for the result, which says whether they happened.
-// A call the tool ran in the background returns before anything in it has
-// finished, so each of its commits is guarded.
+// the dispatch; commits and skill-file reads wait for the result, which says
+// whether they happened. A call the tool ran in the background returns before
+// anything in it has finished, so each of its commits is guarded and nothing
+// it prints is in the result.
 func (d *decoder) bashCommand(at time.Time, command string, background bool) *bashCall {
 	call := &bashCall{at: at, mentionsCommit: strings.Contains(command, "commit")}
 	call.envoy.mentions = envoyCall.MatchString(command)
@@ -349,6 +352,13 @@ func (d *decoder) bashCommand(at time.Time, command string, background bool) *ba
 			}
 			commit.guarded = c.Guarded || background
 			call.commits = append(call.commits, commit)
+		}
+		if !c.Guarded && !background {
+			for _, name := range skillsPrinted(argv, c) {
+				if !slices.Contains(call.reads, name) {
+					call.reads = append(call.reads, name)
+				}
+			}
 		}
 		d.rounds.command(&call.envoy, at, argv)
 		if len(argv) >= 3 && argv[0] == "gh" && argv[1] == "pr" && argv[2] == "create" {
@@ -493,6 +503,15 @@ func (d *decoder) result(at time.Time, b block) {
 	delete(d.bash, b.ToolUseID)
 	text, _, _ := content(b.Content)
 
+	// cat prints no line of its own, and the output cannot stand in for one:
+	// `cat -n` numbers a skill's opening lines and a long output is set aside
+	// with only its start kept. So a read counts on the call's success, as a
+	// Read call does, and a guarded one never counts.
+	if !b.IsError {
+		for _, name := range call.reads {
+			d.add(Event{At: call.at, Kind: Read, Name: name})
+		}
+	}
 	d.committed(call, b.IsError, text)
 	d.rounds.settle(&call.envoy, call.at, at, b.IsError, text)
 	if call.createsPR && !b.IsError {

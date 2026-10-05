@@ -175,6 +175,38 @@ func TestAssignmentsFollowScope(t *testing.T) {
 	}
 }
 
+// What a command prints is the text's own output unless a pipe, a file or a
+// substitution takes it. Standard error is returned with the output, so
+// sending it elsewhere, or sending output to it, captures nothing.
+func TestOutputTakenElsewhereIsCaptured(t *testing.T) {
+	for src, want := range map[string]string{
+		`cat a`:                                     "cat",
+		`cat a 2>/dev/null || cat b`:                "cat cat",
+		`cat a 2>&1; cat b >&2`:                     "cat cat",
+		`cat a | head -3`:                           "head",
+		`cat a | grep x | wc -l`:                    "wc",
+		`ls | cat a`:                                "cat",
+		`cat a > copy; cat b >> copy`:               "",
+		`cat a 1>copy; cat b &>copy`:                "",
+		`x=$(cat a); echo "$x"`:                     "echo",
+		`diff <(cat a) b`:                           "diff",
+		`{ cat a; cat b; } | wc -l`:                 "wc",
+		`(cat a; cat b) > copy; ls`:                 "ls",
+		`f() { cat a; }; f > copy; f`:               "cat",
+		`for f in a b; do cat "$f"; done | tail -1`: "tail",
+	} {
+		var shown []string
+		for _, c := range split(t, src) {
+			if !c.Captured {
+				shown = append(shown, c.Argv()[0])
+			}
+		}
+		if got := strings.Join(shown, " "); got != want {
+			t.Errorf("%s\n  not captured: %q, want %q", src, got, want)
+		}
+	}
+}
+
 func TestTextThatDoesNotParse(t *testing.T) {
 	for _, src := range []string{`echo "open`, `echo $(ls`, "f() {", "if true; then"} {
 		if cmds, err := Split(src, ""); err == nil {
