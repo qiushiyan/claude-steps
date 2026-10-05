@@ -86,8 +86,9 @@ A session view reads from the top, newest first:
   them. A round is one step, at its dispatch, so the `review` lines count the
   review rounds. The commits between two steps are one count line, and so are
   those after the newest step and before the oldest; the commits above a round
-  were made after its dispatch. The last line says how many rows the full
-  history holds.
+  were made after its dispatch. A run of the same line under the same labels
+  is one line, at the time of its last, with `(3 times)`. The last line says
+  how many rows the full history holds.
 - **`show --all`** prints that history in the steps' place: every line below,
   each with the labels it is under. With no label configured, `show` prints
   it too.
@@ -145,8 +146,8 @@ On the board a label's cell is the time of its latest event (`11m`, `2d`);
 for a round that is the dispatch. `+2` counts the commits made since that
 event started; `read`, `pasted` or `named` in front says the latest event was
 only a file read, only a pasted snippet, or only a prompt that named the
-skill; `·` says nothing matches. `no collect` holds the
-time of the newest round with no collect seen, and `×2` when there are two.
+skill; `·` says nothing matches. `no collect` holds the time of the newest
+round with no collect seen, and `×2` when there are two.
 
 A transcript that cannot be read says so (`no transcript`,
 `transcript unreadable`, `3 lines could not be read`) and is never drawn as an
