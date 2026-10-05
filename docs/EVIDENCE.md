@@ -369,9 +369,9 @@ Over the rendered window.
 - **Cells that say `pasted`:** `spec` in 13 of 25 and 11 of 12 sessions that
   hold any event under it, each `implement-spec`; `prompts` in 6 of 64 and 1
   of 19, each `prompt-check`; `verify` in 3 of 25 and 0 of 21.
-- **`check`:** no drift from the new binary over the laptop's 183
-  transcripts of the last 7 days. The popup's own test in the dotfiles
-  passes on the installed binary.
+- **`check`:** no drift from the new binary over the 183 and 71 transcripts
+  of the last 7 days. The popup's own test in the dotfiles passes on the
+  laptop's installed binary.
 
 ### Decided by the user
 
@@ -387,8 +387,7 @@ Over the rendered window.
 - The 5 and 2 `loopy-closeout` rows are commands from before the snippet had
   those words (`~/dotfiles/tabtype/EVIDENCE.md`): typed by hand, and read as
   pasted.
-- On the mini the new binary ran from a scratch directory, and `check` was
-  not run there.
+- On the mini the comparison's binaries ran from a scratch directory.
 - The word costs a column 7 columns. The live boards need 102 columns on the
   laptop, with no paste cell, and 117 on the mini, with `pasted` under
   `spec`; the popup gives about 121 and 151. No board was looked at with the
