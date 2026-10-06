@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/qiushiyan/claude-steps/internal/record"
@@ -92,25 +93,13 @@ type line struct {
 	times  int  // how many equal lines in a row this one stands for
 	count  bool // a count of commits, which has no time of its own
 	// ask is the request a step answered, said before what ran.
-	ask string
-	// short is a request's words when another line says them: cut to
-	// askWidth, so what ran keeps its room.
-	short  string
-	prompt int  // the human prompt the event came under
-	slash  bool // a slash command the user typed, which is a prompt of its own
+	ask *record.Event
 }
 
 // lineOf is the line an event starts as: its time, its labels and its words,
 // drawn as a problem when the transcript says the call failed.
 func (v View) lineOf(e record.Event) line {
-	l := line{at: e.At, kind: e.Kind, labels: record.LabelsOf(v.Labels, e), text: v.describe(e),
-		prompt: e.Prompt, slash: e.Kind == record.Skill && e.Via == "slash"}
-	switch {
-	case e.Kind == record.Mention:
-		l.short = fmt.Sprintf("you: %q", cut(oneLine(e.Text), askWidth-7))
-	case e.Kind == record.Snippet, l.slash:
-		l.short = cut(oneLine(l.text), askWidth)
-	}
+	l := line{at: e.At, kind: e.Kind, labels: record.LabelsOf(v.Labels, e), text: v.describe(e)}
 	if e.Failed {
 		l.style = problem
 	}
@@ -121,118 +110,55 @@ func (v View) lineOf(e record.Event) line {
 // and what went wrong where something did. How it was dispatched and
 // collected is the history's to say.
 func round(e record.Event) (string, style) {
-	switch {
-	case e.Failed && e.CollectedAt != nil:
-		return join(e.Name, dispatch(e)+", "+collect(e, "")), problem
-	case e.Failed:
-		return join(e.Name, dispatch(e)), problem
-	case e.CollectFailed:
-		return join(e.Name, collect(e, "")), problem
+	var words []string
+	if e.Failed {
+		words = append(words, dispatch(e))
 	}
-	return join(e.Name, said(e)), plain
+	switch {
+	case e.CollectFailed:
+		words = append(words, "collect returned an error")
+	case said(e) != "":
+		words = append(words, said(e))
+	}
+	st := plain
+	if e.Failed || e.CollectFailed {
+		st = problem
+	}
+	return join(e.Name, strings.Join(words, ", ")), st
 }
 
-// outline is the timeline the steps are picked from, oldest first: a line
-// for each thing that ran under a label, and for each request nothing
-// answered. A request under a label (a paste, a prompt that names a skill) is
-// answered by the first run or round under that label in the same human
-// prompt, or by the slash command typed next, which is a prompt of its own:
-// the answer's line says the request first, and the request has no line of
-// its own there. The same request sent again before an answer is one.
-//
-// Under a label that lists rounds a step is a round, dated at its dispatch:
-// every round a skill there runs is dispatched, so the skill's runs and reads
-// since the label's last round are this round's, and their lines go. The
-// latest request among them is the round's, a slash command the user typed
-// being one; with none, the latest run lends the round the model's words. The
-// join is by order alone. A dispatch the session replaced has no line. The
-// full history keeps each of these at its own time.
+// outline is the timeline the steps are picked from, oldest first: the
+// session's steps as record.Steps reads them, each with the request it
+// answered or the run whose words a round carries, its commits, and its
+// notes. The full history keeps every event at its own time.
 func (v View) outline(rec record.Record) []line {
+	steps := map[int]record.Step{}
+	for _, st := range record.Steps(rec.Events, v.Labels) {
+		steps[st.Index] = st
+	}
 	var out []line
-	loads := map[string][]int{} // label → the lines of its runs and reads since its last round
-	asks := map[string]int{}    // label → the line of a request nothing under it has answered
-	gone := map[int]bool{}      // lines another line took
-	// settle takes a label off a request's line: it is answered there, or
-	// sent again. A request with no label left has no line.
-	settle := func(i int, name string) {
-		out[i].labels = slices.DeleteFunc(slices.Clone(out[i].labels), func(n string) bool { return n == name })
-		if len(out[i].labels) == 0 {
-			gone[i] = true
-		}
-		delete(asks, name)
-	}
-	answer := func(l *line) {
-		for _, name := range slices.Clone(l.labels) {
-			i, ok := asks[name]
-			if !ok || !(l.prompt == out[i].prompt || l.slash && l.prompt == out[i].prompt+1) {
-				continue
-			}
-			l.ask = out[i].short
-			settle(i, name)
-		}
-	}
-	// prepare gives a round the runs and reads before it under its labels.
-	prepare := func(l *line) {
-		var took []int
-		for _, name := range l.labels {
-			took = append(took, loads[name]...)
-			delete(loads, name)
-		}
-		slices.Sort(took)
-		words := ""
-		for _, i := range slices.Compact(took) {
-			if gone[i] {
-				continue
-			}
-			gone[i] = true
-			switch r := out[i]; {
-			case r.ask != "":
-				l.ask = r.ask
-			case r.slash:
-				l.ask = r.short
-			case r.kind == record.Skill:
-				words = r.text
-			}
-		}
-		if l.ask == "" {
-			l.text = join(l.text, words)
-		}
-	}
-	for _, e := range rec.Timeline() {
-		l := v.lineOf(e)
+	for i, e := range rec.Events {
+		st, ok := steps[i]
 		switch {
-		case e.Kind == record.Round && e.Redispatched:
-			continue
-		case e.Kind == record.Snippet || e.Kind == record.Mention:
-			for _, name := range l.labels {
-				if i, ok := asks[name]; ok && out[i].text == l.text {
-					settle(i, name)
-				}
-				asks[name] = len(out)
+		case ok:
+			l := v.lineOf(e)
+			l.labels, l.ask = st.Labels, st.Ask
+			if e.Kind == record.Round {
+				l.text, l.style = round(e)
 			}
-		case e.Kind == record.Round:
-			l.text, l.style = round(e)
-			if e.Dispatched && !e.Failed {
-				prepare(&l)
-				if l.ask == "" {
-					answer(&l)
-				}
+			if st.Lent != nil {
+				l.text = join(l.text, v.describe(*st.Lent))
 			}
-		case e.Kind == record.Skill && !e.Failed, e.Kind == record.Read:
-			answer(&l)
-			for _, name := range l.labels {
-				loads[name] = append(loads[name], len(out))
-			}
-		}
-		out = append(out, l)
-	}
-	kept := out[:0]
-	for i, l := range out {
-		if !gone[i] {
-			kept = append(kept, l)
+			out = append(out, l)
+		case e.Kind == record.Commit:
+			out = append(out, v.lineOf(e))
 		}
 	}
-	return kept
+	for _, n := range rec.Notes {
+		out = append(out, v.lineOf(record.Event{At: n.At, Kind: record.Note, Text: n.Text}))
+	}
+	slices.SortStableFunc(out, func(a, b line) int { return a.at.Compare(b.at) })
+	return out
 }
 
 // lines are a session's whole timeline, oldest first. A round this session
@@ -295,7 +221,7 @@ func collapse(lines []line) []line {
 	var out []line
 	for _, l := range lines {
 		l.times = 1
-		if n := len(out); n > 0 && l.kind != record.Note && !l.count && out[n-1].kind == l.kind && out[n-1].text == l.text && out[n-1].ask == l.ask && slices.Equal(out[n-1].labels, l.labels) {
+		if n := len(out); n > 0 && l.kind != record.Note && !l.count && out[n-1].kind == l.kind && out[n-1].text == l.text && sameAsk(out[n-1].ask, l.ask) && slices.Equal(out[n-1].labels, l.labels) {
 			out[n-1].at = l.at
 			out[n-1].times++
 			continue
@@ -305,12 +231,27 @@ func collapse(lines []line) []line {
 	return out
 }
 
-// asked puts a step's request before what ran in answer to it.
-func asked(ask, text string) string {
-	if ask == "" {
-		return text
+// request is the words of a step's request in at most n columns, or "" when
+// they do not fit: a paste's key, the opening of the prompt, or the slash
+// command as it was typed.
+func (v View) request(e record.Event, n int) string {
+	switch {
+	case e.Kind == record.Mention && n < 10:
+		return ""
+	case e.Kind == record.Mention:
+		return fmt.Sprintf("you: %q", cut(oneLine(e.Text), n-7))
+	case e.Kind == record.Skill:
+		return cut(oneLine("/"+e.Name+" "+e.Args), n)
 	}
-	return ask + " → " + text
+	return cut(oneLine(v.describe(e)), n)
+}
+
+// sameAsk reports whether two lines answered the same request.
+func sameAsk(a, b *record.Event) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Kind == b.Kind && a.Name == b.Name && a.Text == b.Text && a.Args == b.Args && a.At.Equal(b.At)
 }
 
 // linked names a pull request and says how the session came by it. The
@@ -346,7 +287,10 @@ func (v View) timeline(w io.Writer, lines []line) {
 			tags = of(faint, "note")
 		}
 		// A note is folded rather than cut: it is the user's words.
-		row := trow{lead: []cell{tags, of(plain, v.brief(l.at))}, text: asked(l.ask, l.text), style: l.style, fold: l.kind == record.Note}
+		row := trow{lead: []cell{tags, of(plain, v.brief(l.at))}, text: l.text, style: l.style, fold: l.kind == record.Note}
+		if ask := l.ask; ask != nil {
+			row.ask = func(n int) string { return v.request(*ask, n) }
+		}
 		if l.times > 1 {
 			row.text += fmt.Sprintf("  (%d times)", l.times)
 		}

@@ -19,22 +19,25 @@ type LabelState struct {
 	CommitsSince *int `json:"commits_since,omitempty"`
 }
 
-// Summarise reduces a session's events to one state per label.
+// Summarise reduces a session's events to one state per label, read from
+// the session's steps, so a label's row says what its steps say.
 //
-// A label's latest event is the latest skill, snippet, round or skill-file
-// read that matches it and did not fail. A round whose run returned an error
-// and that was collected all the same did not fail: a result came back. When
-// there is none it is the latest prompt that named one of its skills. Commits
-// are counted from that event's time, which for a round is its dispatch: a
-// commit made while a review runs is not covered by it.
+// A label's latest event is its latest step that did not fail: a run, a
+// read, a round, or a request nothing answered. A round whose run returned an
+// error and that was collected all the same did not fail: a result came
+// back. When there is none it is the latest prompt that named one of its
+// skills. Commits are counted from that event's time, which for a round is
+// its dispatch: a commit made while a review runs is not covered by it.
 func Summarise(events []Event, labels []config.Label) []LabelState {
+	steps := Steps(events, labels)
 	out := make([]LabelState, 0, len(labels))
 	for _, l := range labels {
 		var ran, named *Event
-		for i := range events {
-			e := &events[i]
-			switch {
-			case !belongs(l, e):
+		for _, s := range steps {
+			if !slices.Contains(s.Labels, l.Name) {
+				continue
+			}
+			switch e := &events[s.Index]; {
 			case e.Kind == Mention:
 				named = e
 			case !e.Failed || e.CollectedAt != nil:
@@ -73,8 +76,8 @@ func LabelsOf(labels []config.Label, e Event) []string {
 	return names
 }
 
-// belongs is the one rule for which label an event is under. Summarise and
-// LabelsOf both read it, so a label's row and its steps cannot disagree.
+// belongs is the one rule for which label an event is under. Steps and
+// LabelsOf both read it.
 func belongs(l config.Label, e *Event) bool {
 	switch e.Kind {
 	case Skill, Read:

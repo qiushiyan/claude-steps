@@ -188,6 +188,9 @@ type trow struct {
 	text  string
 	style style
 	fold  bool
+	// ask is a request said before the text, in the columns it is given; ""
+	// when it has no room.
+	ask func(int) string
 }
 
 // table prints rows in columns behind an indent. A row's text takes the room
@@ -207,6 +210,13 @@ func (v View) table(w io.Writer, indent string, rows []trow, most, floor int) {
 	}
 	var lines [][]cell
 	for _, r := range rows {
+		// What ran keeps its room first: the request takes what is left, up
+		// to askWidth, and is left out where that is less than askFloor.
+		if n := min(askWidth, room-3-min(width(r.text), textFloor)); r.ask != nil && n >= askFloor {
+			if ask := r.ask(n); ask != "" {
+				r.text = ask + " → " + r.text
+			}
+		}
 		parts := []string{cut(r.text, room)}
 		if r.fold && r.text != "" {
 			parts = wrap(r.text, room)

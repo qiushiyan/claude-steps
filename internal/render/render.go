@@ -46,6 +46,7 @@ const (
 	textWidth  = 96 // an event's text when the width is not known
 	textFloor  = 24 // the least room the timeline gives an event's text; the popup wraps what runs past
 	askWidth   = 40 // a request said before what ran in answer to it, at most
+	askFloor   = 8  // the least room a request is said in
 	ruleWidth  = 72 // the rule under the header when the width is not known
 	shortBelow = 80 // a head narrower than this gives a row's time as a cell does: "8m", "+1"
 	shown      = 3  // the notes a session's head lists

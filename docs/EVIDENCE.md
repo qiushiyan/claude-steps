@@ -441,7 +441,9 @@ live sessions of the mini were rendered in the popup at 140×32, 100×26 and
   and the `envoy run` after it share the prompt row's `promptId`; a task
   notification starts a turn of its own with no human origin. 3 of the 21
   later runs were the same paste sent again as its own command seconds after
-  (`a9eafb70`, `bc5bec79`, `d5ca20f7`).
+  (`a9eafb70`, `bc5bec79`, `d5ca20f7`). 13 of the 148 matched only because
+  both sides had no prompt at all: briefs envoy dispatched to a headless
+  session, where no row is marked as the user's (`41758103`, `af2985ee`).
 - **Every review and consult skill run dispatches a round,** so a run with no
   round of its own was preparation for the next one. With requests joined,
   12 of the 43 sessions whose `review` lines outnumbered their rounds still
@@ -457,12 +459,18 @@ live sessions of the mini were rendered in the popup at 140×32, 100×26 and
 
 - **Each event knows the human prompt it came under** (`Event.Prompt`,
   `decode.go`, `rounds.go`).
+- **What happened under each label is read once, in `record.Steps`,** and a
+  label's row (`Summarise`) is its latest step, so the row and the steps
+  cannot disagree. Each label is read on its own: a run under two labels
+  that a round of one takes is still a step under the other.
 - **A request is said on the step that answered it**, the first run or round
   under its label in the same prompt or the slash command typed next, as
   `pasted <key> → <what ran>`; the same request sent again before an answer
-  is one (`render.outline`).
+  is one. A request with no known prompt is answered by nothing. Narrow,
+  the request gives way to what ran.
 - **A round takes its label's runs and reads since the last round** and says
-  the latest request among them; with none, the model's words for the run.
+  the latest request among them or made in its own prompt; with none, the
+  model's words for the run.
 - **A round's line and its label's row are its name,** and what went wrong
   where something did. The head has no "no collect seen" rows; the board's
   column stays.
@@ -474,17 +482,21 @@ live sessions of the mini were rendered in the popup at 140×32, 100×26 and
 
 ### Measured after
 
-- **Step lines,** 240 sessions: 1458 to 1278. By label: review 284 to 240,
-  verify 106 to 71, prompts 178 to 127, docs 407 to 370, consult 196 to 187,
-  pr-review 204 to 201, spec 76 to 75, closeout 7 to 7. Per session median 5
-  to 4, p90 13 to 12, the longest 21 to 18.
+With the review's fixes, rendered again on both machines; 2 of the 240
+sessions were moved between them and are counted on each.
+
+- **Step lines,** 240 sessions: 1417 rows to 1279. A row under two labels
+  counts once there and once per label below, 1463 to 1295: review 285 to
+  242, verify 106 to 74, prompts 178 to 129, docs 410 to 376, consult 197 to
+  190, pr-review 204 to 202, spec 76 to 75, closeout 7 to 7. Label tags per
+  session: median 5 to 5, p90 13 to 12, the longest 21 to 18.
 - **A label's lines against its rounds:** sessions where the `review` lines
   outnumber the review rounds, 43 to 1 of 115; `consult`, 7 to 1 of 102. The
   two left: a design prompt that quotes `/review` and is answered in a later
   prompt (`fc3b83cb`), and the consult skill read twice after the last round
   with no round after it (`3a8e018c`).
 - **A paste on a line alone:** 95 to 46, most of them `implement-spec`, which
-  no labelled skill answers. 242 lines say a request before what ran.
+  no labelled skill answers. 230 lines say a request before what ran.
 - **`check`:** no drift over the mini's 114 transcripts of the last 7 days;
   the human prompts the reader counts match the second trace, 374 and 374.
 - **The popup:** its test in the dotfiles passes, 12 of 12, on the mini's
@@ -503,7 +515,8 @@ live sessions of the mini were rendered in the popup at 140×32, 100×26 and
 ### Limits
 
 - Sessions were rendered and compared, and the popup captured; the user has
-  not read the new view yet.
+  not read the new view yet. The counts show fewer lines, not that a joined
+  request caused its run, nor how the view reads at the popup's widths.
 - A round is joined to its runs by order alone, since the label's last
   round. A run that led nowhere hours before a round is folded into it.
 - The laptop's installed binary is the one built at `ad77e1e`.

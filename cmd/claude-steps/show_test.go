@@ -188,6 +188,46 @@ steps
 	lacks(t, out, "skill review", "times)")
 	// The full history keeps each at its own time.
 	contains(t, w.ok("show", id, "--all"), "  review verify   3h   pasted app-review-verify\n", "  prompts         3h   pasted app-prompt-check  (2 times)\n")
+
+	// Narrow, the request gives way to what ran: the round's name and the
+	// skill stay, and a request with too little room is left out.
+	w.env = map[string]string{"COLUMNS": "50"}
+	narrow := w.ok("show", id, "--no-head")
+	contains(t, narrow, " → review-r1\n", "  verify    3h   skill pl-loopy-verify  spikes on…\n")
+	w.env = nil
+
+	// A round takes the request made in its own prompt over one an earlier
+	// run of the skill answered, and answers a request with no run between.
+	// A run of the model's own, asked for by nothing, lends the round its
+	// words.
+	tr = fixture.New()
+	tr.Prompt("now run the review skill on the branch")
+	tr.SkillCall("review", "codex full review", "p1", false)
+	tr.Prompt("<pasted_content id=\"2\">\n/review " + reviewVerify + "\n</pasted_content>")
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.Prompt("<pasted_content id=\"3\">\n/review " + reviewVerify + " again\n</pasted_content>")
+	tr.Bash("envoy run review-r2 --with codex --prompt-file /tmp/r2.md", "Command running in background")
+	tr.Notification("review-r2 finished")
+	tr.SkillCall("review", "codex, the fixes", "p3", false)
+	tr.Bash("envoy run review-r3 --with codex --prompt-file /tmp/r3.md", "Command running in background")
+	tr.Write(t, w.projects, "p", id)
+	out = w.ok("show", id, "--no-head")
+	contains(t, out, "  review   3h   review-r3  skill review  codex, the fixes\n"+
+		"  review   3h   pasted app-review-verify → review-r2\n"+
+		"  verify   3h   pasted app-review-verify\n"+
+		"  review   3h   pasted app-review-verify → review-r1\n\n")
+	lacks(t, out, "now run the review", "codex full review")
+
+	// With no prompt marked as the user's, nothing says which prompt a run
+	// answered, and a request and a run stay apart.
+	tr = fixture.New()
+	tr.Unsourced("run pl-loopy-verify now")
+	tr.Unsourced("then something else entirely")
+	tr.Read("/home/u/.claude/skills/pl-loopy-verify/SKILL.md", false)
+	tr.Write(t, w.projects, "p", id)
+	out = w.ok("show", id, "--no-head")
+	contains(t, out, "  verify   3h   read skills/pl-loopy-verify/SKILL.md\n  verify   3h   you: \"run pl-loopy-verify now\"\n")
+	lacks(t, out, "→")
 }
 
 // A name dispatched again before any collect is one round: envoy collects a
@@ -234,12 +274,12 @@ func TestARunThatReturnedAnError(t *testing.T) {
 	tr.BashError(run, "job: /jobs/app-1/review-r1\nprovider: codex\nstatus: timeout — the turn hit its cap\n")
 	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "timeout"))
 	contains(t, show(tr),
-		"review    3 hours ago   0 commits since   review-r1 run returned an error, collected, envoy said timeout\n",
-		"\nsteps\n  review   3h   review-r1  run returned an error, collected, envoy said timeout\n\n",
+		"review    3 hours ago   0 commits since   review-r1 run returned an error, envoy said timeout\n",
+		"\nsteps\n  review   3h   review-r1  run returned an error, envoy said timeout\n\n",
 	)
 	contains(t, show(tr, "--all"), "  review   3h   review-r1  collected, envoy said timeout\n  review   3h   review-r1  run returned an error\n")
 	w.env = map[string]string{"CLICOLOR_FORCE": "1"}
-	contains(t, show(tr), "\x1b[31mreview-r1  run returned an error, collected, envoy said timeout\x1b[0m\n")
+	contains(t, show(tr), "\x1b[31mreview-r1  run returned an error, envoy said timeout\x1b[0m\n")
 	w.env = nil
 
 	tr = fixture.New()
@@ -471,6 +511,7 @@ func TestAStepUnderTwoLabels(t *testing.T) {
 [[label]]
 name = "review"
 skills = ["review"]
+jobs = ["review-"]
 count_commits = true
 
 [[label]]
@@ -501,6 +542,16 @@ steps
 		"  \x1b[34mreview\x1b[0m \x1b[33mdocs\x1b[0m   3h   \x1b[31mskill review  failed to load\x1b[0m\n",
 		"\x1b[33mdocs\x1b[0m     3 hours ago",
 	)
+	// A run under two labels that a round of one takes is still a step under
+	// the other, and the label's row there says it.
+	w.env = nil
+	tr = fixture.New()
+	tr.Read("/home/u/.claude/skills/review/SKILL.md", false)
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.Write(t, w.projects, "p", id)
+	out = w.ok("show", id)
+	contains(t, out, "\nsteps\n  review   3h   review-r1\n  docs     3h   read skills/review/SKILL.md\n\n",
+		"docs     3 hours ago                     read skills/review/SKILL.md\n")
 }
 
 // With no label configured there are no steps to pick, and the view is the
@@ -675,6 +726,16 @@ func TestTheHeadFitsTheSideColumn(t *testing.T) {
 		}
 	}
 	contains(t, escape.ReplaceAllString(painted, ""), "\uf07c /work/a-checkout-with-a-long-name\n\ue0a0 feat/a-branch-name\n")
+	// Narrower than a marked item, the item folds under its text, whole.
+	w.env["COLUMNS"] = "30"
+	narrow := escape.ReplaceAllString(w.ok("show", id, "--head"), "")
+	for _, row := range strings.Split(narrow, "\n") {
+		if screen.StringWidth(row) > 30 {
+			t.Errorf("a painted row takes %d columns:\n%s", screen.StringWidth(row), row)
+		}
+	}
+	contains(t, narrow, "\uf07c /work/a-checkout-with-a-long\n  -name\n")
+	w.env["COLUMNS"] = "44"
 	delete(w.env, "CLICOLOR_FORCE")
 
 	// The steps stand on their own: what the view may lack comes first, and

@@ -613,7 +613,8 @@ func TestAPasteDatesItsLabelUntilALoadFollows(t *testing.T) {
 
 // Each event knows the human prompt it came under, counted from one: the
 // prompt's own events, and what the session did until the next one. A task
-// notification starts no prompt, and a slash command the user typed is one.
+// notification starts no prompt, and a slash command the user typed is one,
+// whose words are read under it even when no expansion follows it.
 func TestEventsKnowThePromptTheyCameUnder(t *testing.T) {
 	tr := fixture.New()
 	tr.SkillCall("review", "before any prompt", "p0", false)
@@ -624,12 +625,14 @@ func TestEventsKnowThePromptTheyCameUnder(t *testing.T) {
 	tr.SkillCall("pl-loopy-verify", "spikes", "p1", false)
 	tr.Slash("review", "again", "/home/u/.claude/skills/review")
 	tr.Read("/home/u/.claude/skills/pl-loopy-verify/SKILL.md", false)
+	tr.Prompt("<command-message>pl-loopy-verify</command-message>\n<command-name>/pl-loopy-verify</command-name>\n<command-args>now</command-args>")
+	tr.Prompt("next")
 	var got []string
 	for _, e := range load(t, tr).Events {
 		got = append(got, fmt.Sprintf("%s %s %d", e.Kind, e.Name, e.Prompt))
 	}
 	expected := []string{"skill review 0", "snippet app-review-verify 1", "skill review 1", "round review-r1 1",
-		"skill pl-loopy-verify 1", "skill review 2", "read pl-loopy-verify 2"}
+		"skill pl-loopy-verify 1", "skill review 2", "read pl-loopy-verify 2", "mention  3"}
 	if !reflect.DeepEqual(got, expected) {
 		t.Errorf("got  %q\nwant %q", got, expected)
 	}
