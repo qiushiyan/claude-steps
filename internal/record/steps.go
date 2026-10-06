@@ -64,7 +64,9 @@ func Steps(events []Event, labels []config.Label) []Step {
 		if s.ask >= 0 {
 			out[i].Ask = &events[s.ask]
 		}
-		if s.lent >= 0 {
+		// A request under any of the step's labels is said, and then the
+		// model's words are not.
+		if s.lent >= 0 && s.ask < 0 {
 			out[i].Lent = &events[s.lent]
 		}
 	}

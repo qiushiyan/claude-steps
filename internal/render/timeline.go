@@ -236,10 +236,16 @@ func collapse(lines []line) []line {
 // command as it was typed.
 func (v View) request(e record.Event, n int) string {
 	switch {
-	case e.Kind == record.Mention && n < 10:
-		return ""
 	case e.Kind == record.Mention:
-		return fmt.Sprintf("you: %q", cut(oneLine(e.Text), n-7))
+		// Quoting escapes some characters, so the words are cut until the
+		// quoted form fits, closing quote and all; with fewer than four
+		// columns of words the request is left out.
+		for m := n - 7; m >= 4; m-- {
+			if q := fmt.Sprintf("you: %q", cut(oneLine(e.Text), m)); width(q) <= n {
+				return q
+			}
+		}
+		return ""
 	case e.Kind == record.Skill:
 		return cut(oneLine("/"+e.Name+" "+e.Args), n)
 	}

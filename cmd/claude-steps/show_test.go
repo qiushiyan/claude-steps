@@ -228,6 +228,17 @@ steps
 	out = w.ok("show", id, "--no-head")
 	contains(t, out, "  verify   3h   read skills/pl-loopy-verify/SKILL.md\n  verify   3h   you: \"run pl-loopy-verify now\"\n")
 	lacks(t, out, "→")
+
+	// A prompt whose quotes are escaped where it is said still keeps to its
+	// room, and its closing quote.
+	tr = fixture.New()
+	tr.Prompt(`run /review with "codex" on "goal"`)
+	tr.SkillCall("review", "goal", "p1", false)
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.Write(t, w.projects, "p", id)
+	w.env = map[string]string{"COLUMNS": "59"}
+	contains(t, w.ok("show", id, "--no-head"), `  review   3h   you: "run /review with \"code…" → review-r1`+"\n")
+	w.env = nil
 }
 
 // A name dispatched again before any collect is one round: envoy collects a
@@ -314,6 +325,14 @@ jobs = ["review-"]
 	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "ok"))
 	tr.Write(t, w.projects, "p", id)
 	contains(t, w.ok("show", id), "\nsteps\n  review docs   3h   /update-docs newer → review-r1\n\n")
+
+	// A request under one label is the round's, and the model's own run
+	// under the other lends it no words.
+	tr = fixture.New().Slash("review", "older", "/home/u/.claude/skills/review")
+	tr.SkillCall("update-docs", "newer", "p", false)
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/p.md", "Command running in background")
+	tr.Write(t, w.projects, "p", id)
+	contains(t, w.ok("show", id), "\nsteps\n  review docs   3h   /review older → review-r1\n\n")
 }
 
 // Obligation 17: --json carries timestamps and nothing relative.
