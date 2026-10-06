@@ -12,7 +12,7 @@ and tells the model nothing.
 ```text
 $ claude-steps show
 The calendar walks days once   9ba78130   work:2.1
-~/dev/app  feat/calendar   1 compaction, last 2 hours ago
+~/dev/app  feat/calendar   1 compaction, last 2 hours ago   last message 1 minute ago
 PR #7145 opened here  https://github.com/acme/app/pull/7145
 ────────────────────────────────────────────────────────────────────────
 review   2 hours ago      1 commit since    review-r2 collected 1 hour ago
@@ -44,11 +44,11 @@ covers the code: "review, 2 hours ago, 1 commit since" is for you to judge.
 ## Commands
 
 ```text
-claude-steps show [<pane>|<session>] [--all] [--json]   one session: its labels, notes and steps
-claude-steps board [--json] [--ids]                     every Claude pane in tmux, one row each
-claude-steps note <pane>|<session> <text…>              append a note to a session
-claude-steps check                                      test the reader against recent transcripts
-claude-steps import-notes <session id>                  merge notes from another machine, read on stdin
+claude-steps show [<pane>|<session>] [--all] [--json|--head|--no-head]   one session: its labels, notes and steps
+claude-steps board [--json] [--ids] [--brief]                           every Claude pane in tmux, one row each
+claude-steps note <pane>|<session> <text…>                              append a note to a session
+claude-steps check                                                      test the reader against recent transcripts
+claude-steps import-notes <session id>                                  merge notes from another machine, read on stdin
 ```
 
 `<pane>` is a tmux pane id such as `%12`; `show` defaults to the pane it runs
@@ -60,15 +60,21 @@ live pane's full session id works before the session has a transcript.
 Without something setting it, the board is empty and `show <session id>`
 still works.
 
+The tmux popup (`prefix S`) shows one session's steps beside its status and
+a list of the other sessions. `show --no-head` prints the steps alone, or
+with `--all` the history, with no heading; `show --head` prints what comes
+before them; and `board --brief` prints each session as its pane, the age of
+its last message and its title, with no header line.
+
 ## Reading a view
 
 A session view reads from the top, newest first:
 
 - **The header:** the title, the session id and its pane; then the directory,
-  the branch and the compactions; then each pull request the session opened
-  or linked with its link, newest first. No `PR` there says the session has
-  none. A transcript that could not be read in full says so on the next
-  line.
+  the branch, the compactions and when the transcript last had a message; then
+  each pull request the session opened or linked with its link, newest first.
+  No `PR` there says the session has none. A transcript that could not be read
+  in full says so on the next line.
 - **The labels:** one row for each, always: when its latest event happened,
   the commits made since where the label counts them, and the event. For a
   round the time and the count run from its dispatch, and `collected …` in
@@ -81,14 +87,15 @@ A session view reads from the top, newest first:
   the same name is not listed: the later dispatch is the round. A run counts
   as dispatched when its call returned no error, so one on a branch that was
   skipped, or one envoy refused, is listed too. `·` says there is none.
-- **`notes`:** your latest notes. `show --all` lists every one.
+- **`notes`:** your latest notes, one line each, cut where the width is
+  known. `show --all` lists every one.
 - **`steps`:** what ran under a label, and your notes at the time you wrote
-  them. A round is one step, at its dispatch, so the `review` lines count the
-  review rounds. The commits between two steps are one count line, and so are
-  those after the newest step and before the oldest; the commits above a round
-  were made after its dispatch. A run of the same line under the same labels
-  is one line, at the time of its last, with `(3 times)`. The last line says
-  how many rows the full history holds.
+  them, each whole. A round is one step, at its dispatch, so the `review`
+  lines count the review rounds. The commits between two steps are one count
+  line, and so are those after the newest step and before the oldest; the
+  commits above a round were made after its dispatch. A run of the same line
+  under the same labels is one line, at the time of its last, with
+  `(3 times)`. The last line says how many rows the full history holds.
 - **`show --all`** prints that history in the steps' place: every line below,
   each with the labels it is under. With no label configured, `show` prints
   it too.
@@ -151,14 +158,14 @@ round with no collect seen, and `×2` when there are two.
 
 A transcript that cannot be read says so (`no transcript`,
 `transcript unreadable`, `3 lines could not be read`) and is never drawn as an
-empty timeline. `no transcript` says every project directory was looked in;
-one that could not be is `transcript unreadable`, with its path, and
-`claude-steps check` fails. `the reader may have missed …` says a fact may
-be absent from the view: Claude Code's transcript format may have moved, or
-an envoy call took its job from a variable or a file and printed no `job:`
-line. `claude-steps check` says whether the misses amount to drift. On the
-board `!` before a title marks such a session, and the words are in its note
-cell where there is room.
+empty timeline: its steps are your notes, which outlive it. `no transcript`
+says every project directory was looked in; one that could not be is
+`transcript unreadable`, with its path, and `claude-steps check` fails. `the reader may
+have missed …` says a fact may be absent from the view: Claude Code's
+transcript format may have moved, or an envoy call took its job from a
+variable or a file and printed no `job:` line. `claude-steps check` says
+whether the misses amount to drift. On the board `!` before a title marks such
+a session, and the words are in its note cell where there is room.
 
 Colour names and never grades. Each label's name has a hue; red marks an
 error the transcript reports and what the reader could not read; a count of
@@ -166,11 +173,14 @@ commits is bold when there are any. Output is coloured on a terminal, or
 through a pipe with `CLICOLOR_FORCE=1`, and never with `NO_COLOR` set.
 
 With `COLUMNS` set, a view fits that width: an event's text is cut to one
-line, and on the board the title and the note give way while the label cells
-keep theirs. A note with no room is left to the session view, and where the
-cells alone leave the title no room the columns close up to one space. In a
-header that does not fit one line the pull requests start a line of their
-own, and a link is never cut.
+line, and a note in the steps is folded onto the lines under it. The part
+before the steps fits whole: what does not fit a line starts the next, the
+pull requests start a line of their own when the header does not fit one, a
+link, a path or a warning wider than the width is folded and never cut, and
+below 80 columns a row gives its time and its count as the board's cells do
+(`8m`, `+1`). On the board the title and the note give way while the label
+cells keep theirs. A note with no room is left to the session view, and where
+the cells alone leave the title no room the columns close up to one space.
 
 Not shown: commits made by a subagent, by `git merge`, `rebase` or
 `cherry-pick`, or inside a script.

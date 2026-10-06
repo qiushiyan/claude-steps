@@ -76,14 +76,22 @@ Nothing persists between invocations except the notes.
   current time, the labels, the width to fill and whether to paint are passed
   in. It works out a session's label states from those labels, so a board's
   header and its cells have one source. It owns the layers of a session
-  view, which lines are steps, every style, and the fit to a width. A line
-  is built from cells that carry their text and their style apart, so
-  alignment measures text alone and the plain output is the painted output
-  with the escapes removed.
+  view, which lines are steps, every style, and the fit to a width. A view
+  is its head (what the session is, its labels, the rounds with no collect
+  seen, the notes) and its timeline, and each prints alone. The head fits a
+  narrow width whole: an item folds rather than run past, a row's text is
+  cut to its room, and a note is one line there, since the steps keep it
+  whole. The timeline gives an event's text a floor of room and lets the
+  line run past it, since the popup wraps it. A line is built from cells
+  that carry their text and their style apart, so alignment measures text
+  alone and the plain output is the painted output with the escapes removed.
 - **The popup:** `~/dotfiles/tmux/.config/tmux/scripts/tmux-steps.sh`. It
   owns fzf, keys and pane switching and shows only what the binary prints.
-  It reads the binary through a pipe, so it asks for colour and gives each
-  call its width.
+  It lays one session out as lazygit does: the steps (`show --no-head`) in
+  the main panel, the head (`show --head`) above the session list
+  (`board --brief`) in a side column. It reads the binary through a pipe,
+  so it asks for colour and gives each call its width. `steps.md` beside it
+  holds its design.
 
 ## The model
 
@@ -135,7 +143,8 @@ Nothing persists between invocations except the notes.
 - **Read status:** `ok`, `partial`, `unreadable`, `missing`. `missing` says
   every directory that could hold the transcript was looked in; one that
   could not be is `unreadable`, with its path. Neither renders as an empty
-  timeline.
+  timeline: such a session's steps are its notes, which outlive the
+  transcript.
 - **Signals:** each fact is counted by the reader's rule and by a second
   trace that should exist whenever the first does. A second trace with no
   match is a miss, and so is an envoy call whose job neither its text nor
@@ -268,6 +277,13 @@ Nothing persists between invocations except the notes.
 - **A pasted prompt read for skill names too,** so that a label listing the
   skill and not the key shows `named`: every paste becomes a second row of
   the full history.
+- **A popup with every session's board row on top and the session view
+  under it:** the popup is opened to read the session it was opened from,
+  and a row of label cells reads as a grid of stages, not as the order the
+  steps ran in. The board stays for a terminal.
+- **A note folded in the head:** beside the steps the head is a narrow
+  column of fixed height, so a long note would take rows from the session
+  list, and the steps beside it fold each note whole.
 - **A block of history under each label, or a lane per label:** the first
   loses the order across labels, the second has no room for an event's text.
 - **A row drawn faint when no label has an event:** such a session can hold
@@ -279,14 +295,20 @@ Nothing persists between invocations except the notes.
 ## Contracts other repositories depend on
 
 - **`board --ids` rows:** `<pane id> TAB <session id> TAB <text>`, both ids
-  empty on the header line. The popup parses them. The text may carry escape
-  codes; the ids never do.
-- **`show --all`:** what the popup's preview runs for a session's history.
+  empty on the header line. The popup parses them from `board --ids --brief`,
+  which has no header line. The text may carry escape codes; the ids never
+  do.
+- **`show --head` and `show --no-head [--all]`:** the popup's status and its
+  main panel. `show --no-head` opens with what the view may lack, so the
+  main panel stands on its own.
 - **The environment the popup sets:** `CLICOLOR_FORCE=1` asks for colour
   through a pipe and `COLUMNS` is the width a line may fill; `NO_COLOR` wins
   over both.
-- **Text the popup test waits on:** a session view's first line,
-  `<title>   <short id>   <pane>`, and its `steps` and `history` headings.
+- **Text the popup test waits on:** the head's first line,
+  `<title>   <short id>   <pane>` (the id and the pane start the next line
+  when the title fills the width), a label row in its brief form, the brief
+  list's rows cut to the side column, and the newest step on the main
+  panel's first line.
 - **The notes file and `import-notes`:**
   `$XDG_STATE_HOME/claude-steps/notes/<id>.jsonl`, one JSON note per line.
   `claude-tomini` sends a moved session's file to `claude-steps import-notes`
@@ -315,10 +337,12 @@ Nothing persists between invocations except the notes.
 - **A new line or cell in a view:** build it from cells with a style, never
   a string that holds an escape. `TestColourIsTheSameTextPainted` holds the
   painted and the plain output to one text, `TestBoard` pins the grammar of a
-  cell, and `TestTheBoardFitsTheWidth` holds the label cells whole at any
-  width. A cell that says more is wider on every row of its column, and
-  `TestTheBoardClosesUpBeforeItRunsOver` holds what gives way when the cells
-  alone are too wide: the space between columns, never a cell.
+  cell, `TestTheBoardFitsTheWidth` holds the label cells whole at any
+  width, and `TestTheHeadFitsTheSideColumn` holds the head inside the
+  popup's narrowest side column. A cell that says more is wider on every
+  row of its column, and `TestTheBoardClosesUpBeforeItRunsOver` holds what
+  gives way when the cells alone are too wide: the space between columns,
+  never a cell.
 
 ## The build's record
 

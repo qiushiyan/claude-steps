@@ -19,11 +19,11 @@ is what the user sees.
 - **Tests never read real transcripts or write real notes.** Build rows with
   `internal/fixture` and run under a temporary `HOME`; no private transcript
   is committed, and this repository is public.
-- **Contract changes cross repositories.** `board --ids`, `show --all`, the
-  colour and width environment, the notes file, `import-notes` and the
-  configuration keys are used by `~/dotfiles` (`tmux-steps.sh`,
-  `claude-tomini`, the `claude-steps` package). `docs/design.md` § Contracts
-  other repositories depend on.
+- **Contract changes cross repositories.** `board --ids --brief`,
+  `show --head`, `show --no-head`, the colour and width environment, the
+  notes file, `import-notes` and the configuration keys are used by
+  `~/dotfiles` (`tmux-steps.sh`, `claude-tomini`, the `claude-steps`
+  package). `docs/design.md` § Contracts other repositories depend on.
 - Callers run `claude-steps` from PATH. Run `make check` before shipping and
   `make install` after: a source edit alone leaves the popup on the old
   binary.
