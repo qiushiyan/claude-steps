@@ -4,7 +4,8 @@
 //
 // Nothing here says a check is finished or still holds. A line states what the
 // transcript holds and when it happened, and colour follows the same rule: a
-// hue names a label or marks a problem, and never grades a date.
+// hue names a label, marks a problem or marks the kind of an item in a
+// session's head, and never grades a date.
 package render
 
 import (
@@ -44,9 +45,10 @@ const (
 	labelWidth = 70 // a label's latest event when the width is not known
 	textWidth  = 96 // an event's text when the width is not known
 	textFloor  = 24 // the least room the timeline gives an event's text; the popup wraps what runs past
+	askWidth   = 40 // a request said before what ran in answer to it, at most
 	ruleWidth  = 72 // the rule under the header when the width is not known
 	shortBelow = 80 // a head narrower than this gives a row's time as a cell does: "8m", "+1"
-	shown      = 3  // the notes and the uncollected rounds a session view lists
+	shown      = 3  // the notes a session's head lists
 	viewGap    = 3
 	boardGap   = 2
 	nothing    = "·"

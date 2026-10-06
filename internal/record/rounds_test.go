@@ -112,8 +112,20 @@ func TestFailedRunAndMemberCollect(t *testing.T) {
 	}
 }
 
-// A round is uncollected when this session dispatched it and the transcript
-// holds no collect for it. A run that returned an error is not waiting.
+// waiting are the rounds still waiting for a collect: a dispatch under their
+// name replaces them.
+func waiting(rec Record) []Event {
+	var out []Event
+	for _, e := range rec.Events {
+		if e.Waiting() {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// A round is waiting when this session dispatched it and the transcript holds
+// no collect for it. A run that returned an error is not waiting.
 func TestRoundsWithNoCollect(t *testing.T) {
 	tr := fixture.New()
 	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
@@ -123,7 +135,7 @@ func TestRoundsWithNoCollect(t *testing.T) {
 	tr.Bash("envoy collect review-r0", "job: /j/review-r0\nstatus: ok\n\n--- result.md ---\nfindings")
 	tr.Bash("envoy run spike-r1 --with codex --prompt-file /tmp/s.md", "Command running in background")
 	var names []string
-	for _, e := range load(t, tr).Uncollected() {
+	for _, e := range waiting(load(t, tr)) {
 		names = append(names, e.Name)
 	}
 	if got := strings.Join(names, " "); got != "review-r1 spike-r1" {
@@ -148,7 +160,7 @@ func TestANameDispatchedAgainIsNotWaiting(t *testing.T) {
 	if strings.Join(got, " ") != "true/false false/true false/false" {
 		t.Errorf("redispatched/collected per round: %v", got)
 	}
-	if out := rec.Uncollected(); len(out) != 1 || !out[0].At.After(*rec.Events[1].CollectedAt) {
+	if out := waiting(rec); len(out) != 1 || !out[0].At.After(*rec.Events[1].CollectedAt) {
 		t.Errorf("uncollected: %+v", out)
 	}
 }
@@ -207,7 +219,7 @@ func TestACollectReadsTheRoundItsCommandNamed(t *testing.T) {
 		"round | review-r1 | ok | collected | dispatched",
 		"round | review-r1 | dispatched",
 	)
-	if out := rec.Uncollected(); len(out) != 1 || !out[0].At.After(rec.Events[0].At) {
+	if out := waiting(rec); len(out) != 1 || !out[0].At.After(rec.Events[0].At) {
 		t.Errorf("the later dispatch is the one with no collect: %+v", out)
 	}
 

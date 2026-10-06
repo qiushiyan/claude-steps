@@ -25,32 +25,35 @@ func (v View) Show(w io.Writer, s Session, history bool) {
 
 // Head prints what a session is and where it stands: its title, its
 // directory and pull requests, anything the reader could not read, each
-// label's latest event, the rounds with no collect seen and the notes. With
-// all, every note. A popup shows it beside the timeline, so it fits a narrow
-// width whole: an item that does not fit a line starts the next, one wider
-// than the width is folded, a row's text is cut to the room it has, and below
-// shortBelow columns a row gives its time as a cell does.
+// label's latest event and the notes. With all, every note. A popup shows it
+// beside the timeline, or above it when the popup is small, so it fits a
+// narrow width whole: an item that does not fit a line starts the next, one
+// wider than the width is folded, a row's text is cut to the room it has, and
+// below shortBelow columns a row gives its time as a cell does.
 func (v View) Head(w io.Writer, s Session, all bool) {
 	rec := s.Record
 	ok := readable(rec)
 
-	who := []cell{of(plain, v.title(s)).cut(v.room()), of(faint, short(rec.ID))}
+	who := []cell{of(strong, v.title(s)).cut(v.room()), of(faint, short(rec.ID))}
 	if s.Pane != nil {
-		who = append(who, of(plain, s.Pane.Where))
+		who = append(who, v.mark(paneIcon, hues["cyan"], plain, s.Pane.Where))
 	}
 	var where, links []cell
 	if rec.Cwd != "" {
-		where = v.split(v.path(rec.Cwd), rec.Branch)
+		where = append(where, v.mark(dirIcon, hues["blue"], hues["blue"], v.path(rec.Cwd)))
+	}
+	if rec.Branch != "" {
+		where = append(where, v.mark(branchIcon, hues["magenta"], hues["magenta"], rec.Branch))
 	}
 	if ok {
 		if cs := rec.Compactions(); len(cs) > 0 {
-			where = append(where, of(plain, plural(len(cs), "compaction")+", last "+v.ago(cs[len(cs)-1].At)))
+			where = append(where, v.mark(compactIcon, faint, plain, plural(len(cs), "compaction")+", last "+v.ago(cs[len(cs)-1].At)))
 		}
 		if !rec.LastAt.IsZero() {
-			where = append(where, of(plain, "last message "+v.ago(rec.LastAt)))
+			where = append(where, v.mark(clockIcon, faint, plain, "last message "+v.ago(rec.LastAt)))
 		}
 		for _, pr := range slices.Backward(rec.PullRequests()) {
-			links = append(links, v.split(linked(pr), pr.URL)...)
+			links = append(links, v.split(v.mark(prIcon, hues["green"], hues["green"], linked(pr)), pr.URL)...)
 		}
 	}
 	// The place and the pull requests share a line when it fits, so the
@@ -76,7 +79,6 @@ func (v View) Head(w io.Writer, s Session, all bool) {
 	fmt.Fprintln(w, v.paint(of(faint, strings.Repeat("─", rule))))
 
 	brief := v.Width > 0 && v.Width < shortBelow
-	var summary []trow
 	if ok {
 		if states := record.Summarise(rec.Events, v.Labels); len(states) > 0 {
 			rows := make([]trow, 0, len(states))
@@ -86,9 +88,29 @@ func (v View) Head(w io.Writer, s Session, all bool) {
 			v.table(w, "", rows, labelWidth, 1)
 			fmt.Fprintln(w)
 		}
-		summary = v.uncollected(rec, brief)
 	}
-	v.table(w, "", append(summary, v.notes(rec, all, brief)...), textWidth, 1)
+	v.table(w, "", v.notes(rec, all, brief), textWidth, 1)
+}
+
+// On a terminal the head marks its items with Nerd Font glyphs, as the shell
+// prompt and the tmux bar do, so each kind of fact is found by its mark and
+// its hue. A glyph is drawn with the colour: plain output has neither, since
+// whatever reads it may lack the font.
+const (
+	paneIcon    = "\uf120" // a terminal
+	dirIcon     = "\uf07c" // an open folder
+	branchIcon  = "\ue0a0" // a branch
+	compactIcon = "\uf066" // arrows pointing in
+	clockIcon   = "\uf017" // a clock
+	prIcon      = "\uf407" // a pull request
+)
+
+// mark is a head item behind its glyph, each in its own style.
+func (v View) mark(icon string, glyph, st style, text string) cell {
+	if !v.Color {
+		return of(plain, text)
+	}
+	return of(glyph, icon+" ").add(st, text)
 }
 
 // warn says what the view may lack, folded to the width: it is never cut.
@@ -161,11 +183,14 @@ func (v View) room() int {
 // split is a head item and what follows it: one item when the two fit a
 // line, two when they do not, so a link moves to a line of its own and is
 // never cut.
-func (v View) split(head, tail string) []cell {
-	if tail == "" || width(join(head, tail)) <= v.room() {
-		return []cell{of(plain, join(head, tail))}
+func (v View) split(head cell, tail string) []cell {
+	if tail == "" {
+		return []cell{head}
 	}
-	return []cell{of(plain, head), of(plain, tail)}
+	if head.width()+2+width(tail) <= v.room() {
+		return []cell{head.add(plain, "  "+tail)}
+	}
+	return []cell{head, of(plain, tail)}
 }
 
 // fill packs the head's items into lines no wider than the view. An item
@@ -186,14 +211,25 @@ func (v View) fill(items []cell) []cell {
 }
 
 // fold breaks an item wider than the view into lines that fit, at its spaces
-// where it has them, so a link, a path or a warning is never cut.
+// where it has them, so a link, a path or a warning is never cut. The item's
+// last span is folded; the spans before it (a mark) open the first line, and
+// the lines after start under the text.
 func (v View) fold(c cell) []cell {
-	if c.width() <= v.room() || len(c.spans) != 1 {
+	if c.width() <= v.room() || len(c.spans) == 0 {
 		return []cell{c}
 	}
+	lead := cell{spans: slices.Clone(c.spans[:len(c.spans)-1])}
+	last := c.spans[len(c.spans)-1]
+	if lead.width() >= v.Width {
+		lead = cell{}
+	}
 	var out []cell
-	for _, part := range wrap(c.spans[0].text, v.Width) {
-		out = append(out, of(c.spans[0].style, part))
+	for i, part := range wrap(last.text, v.Width-lead.width()) {
+		if i == 0 {
+			out = append(out, lead.add(last.style, part))
+			continue
+		}
+		out = append(out, of(plain, strings.Repeat(" ", lead.width())).add(last.style, part))
 	}
 	return out
 }
@@ -222,41 +258,14 @@ func (v View) labelRow(l record.LabelState, brief bool) trow {
 			commits = of(loud(*n), fmt.Sprintf("+%d", *n))
 		}
 	}
-	// The cell dates a round from its dispatch; the collect says its own time.
+	// A round is dated at its dispatch, the code its reviewer read.
 	e := *l.Latest
 	row := trow{lead: []cell{name, of(plain, v.when(e.At, brief)), commits}, text: v.describe(e)}
-	if e.Kind == record.Round && e.CollectedAt != nil {
-		if e.Dispatched {
-			row.text = e.Name + "  " + collect(e, v.sentence(*e.CollectedAt, brief))
-		}
-		if e.CollectFailed {
-			row.style = problem
-		}
+	if e.Kind == record.Round {
+		row.text, row.style = round(e)
 	}
 	row.text = oneLine(row.text)
 	return row
-}
-
-// uncollected are the rounds dispatched here with no collect in the
-// transcript, newest first, as rows of a session view. The heading says what
-// was seen and no more: such a round may be running, collected from another
-// session, or given up on.
-func (v View) uncollected(rec record.Record, brief bool) []trow {
-	head := of(faint, "no collect seen")
-	out := rec.Uncollected()
-	if len(out) == 0 {
-		return []trow{{lead: []cell{head, of(faint, nothing)}}}
-	}
-	var rows []trow
-	for i, e := range slices.Backward(out) {
-		if len(out)-i > shown {
-			rows = append(rows, trow{lead: []cell{{}, more(fmt.Sprintf("%d more", i+1))}})
-			break
-		}
-		rows = append(rows, trow{lead: []cell{head, of(plain, v.when(e.At, brief))}, text: e.Name})
-		head = cell{}
-	}
-	return rows
 }
 
 // more says how many rows a list left out. It runs over the columns after

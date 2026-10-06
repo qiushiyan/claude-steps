@@ -30,31 +30,32 @@ const usage = `claude-steps — what has happened in a Claude Code session, read
 <session> is a session id, or its first eight or more characters.
 
 show prints the newest first: each label's latest event and the commits made
-since, the rounds dispatched here with no collect seen, your notes, and the
-steps. A step is an event under a label, or a note; the commits between two
-steps are one count line. A round is one step, at its dispatch: its name,
-what the transcript holds of it when that is not a run and a collect that
-returned a result, and the latest skill run before it. show --all prints the
-whole timeline in the steps' place: skills run, snippets pasted, envoy rounds
-and their collects, commits, pull requests, compactions, and your notes.
+since, your notes, and the steps. A step is what ran under a label, a request
+nothing under it answered, or a note; the commits between two steps are one
+count line. A request (a paste, a prompt that names a skill) is said on the
+step that answered it, the first run under its label in the same prompt or
+the slash command typed next: "pasted review-verify → review-r1". A round is one step, at its dispatch: its
+name, what went wrong when something did, and the request or the skill run
+since the label's last round. show --all prints the whole timeline in the
+steps' place: skills run, snippets pasted, envoy rounds dispatched and
+collected, commits, pull requests, compactions, and your notes.
 
 A view states what the transcript holds. It does not say a check is finished
 or still covers the code; a prompt that only names a skill is shown as your
-words. "no collect seen" means this transcript holds none: the round may be
-running, collected from another session, or given up on. A dispatch replaced
-under the same name is counted on the later one ("dispatched 2 times").
+words.
 
 On the board a label's cell is the time of its latest event ("11m", "2d");
 "+2" counts the commits made since that event started, "read" means a skill's
 file was read and not loaded, "pasted" means a snippet was pasted and nothing
 under the label followed, "named" means a prompt named the skill and nothing
-more was seen. "no collect" holds the time of the newest round with no
-collect seen, and "×2" when there are two. "!" before a title says the
-transcript was read with something missing; the session view says what.
+more was seen. "!" before a title says the transcript was read with
+something missing; the session view says what.
 
-A hue names a label and red marks an error or something unread; no colour
-grades a date. Output is coloured on a terminal, or anywhere with
-CLICOLOR_FORCE=1, and never with NO_COLOR set. COLUMNS is the width to fit.
+A hue names a label, red marks an error or something unread, and in a
+session's head a hue and a Nerd Font glyph mark the pane, the directory, the
+branch and the pull requests; no colour grades a date. Output is coloured on
+a terminal, or anywhere with CLICOLOR_FORCE=1, and never with NO_COLOR set;
+plain output has no glyphs. COLUMNS is the width to fit.
 
 Notes belong to a session id. Resuming keeps the id, so the notes stay. /clear
 starts a new id with an empty timeline and no notes. A forked session also has
@@ -66,8 +67,8 @@ commits made by git merge, rebase or cherry-pick, or through a script.
 import-notes takes the notes file of the same session from another machine
 and adds the notes this machine lacks; claude-tomini uses it.
 
-show --head prints what comes before the steps: the session, its labels, the
-rounds with no collect seen and the notes. show --no-head prints the steps
+show --head prints what comes before the steps: the session, its labels and
+the notes. show --no-head prints the steps
 alone, or with --all the history, with no heading. A popup shows the two side
 by side.
 

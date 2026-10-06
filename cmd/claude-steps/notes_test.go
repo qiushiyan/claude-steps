@@ -23,7 +23,7 @@ func TestNote(t *testing.T) {
 	// Newest first under the labels, and again among the steps at the time
 	// each was written.
 	contains(t, out,
-		"notes             now              second note\n                  20 minutes ago   skip verify, the spike covered it\n",
+		"notes   now              second note\n        20 minutes ago   skip verify, the spike covered it\n",
 		"steps\n  note      now   second note\n  note      20m   skip verify, the spike covered it\n",
 	)
 	contains(t, w.ok("board"), "(2) second note")
@@ -41,7 +41,7 @@ func TestNote(t *testing.T) {
 	// The note text is opaque after "--", even when it reads like an option
 	// (review r1).
 	w.ok("note", worked, "--", "--help")
-	contains(t, w.ok("show", worked), "notes             now              --help\n")
+	contains(t, w.ok("show", worked), "notes   now              --help\n")
 
 	// A damaged line is reported and the notes around it are shown.
 	os.WriteFile(file, append(data, []byte("{broken\n")...), 0o644)
@@ -95,7 +95,7 @@ func TestImportNotes(t *testing.T) {
 	if code := a.run([]string{"import-notes", worked}); code != 0 || out.String() != "1 notes added\n" {
 		t.Fatalf("exit %d, %q, %q", code, out.String(), errb.String())
 	}
-	contains(t, w.ok("show", worked), "notes             now           written here\n                  3 hours ago   from the laptop\n")
+	contains(t, w.ok("show", worked), "notes   now           written here\n        3 hours ago   from the laptop\n")
 	if _, _, code := w.run("import-notes", "aaaaaaaa"); code == 0 {
 		t.Error("import-notes takes a full session id")
 	}

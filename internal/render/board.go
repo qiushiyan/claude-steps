@@ -37,20 +37,6 @@ func (v View) labelCell(l record.LabelState) cell {
 	return c
 }
 
-// uncollectedCell is the same fact on the board: when the newest such round
-// was dispatched, and how many there are when more than one.
-func (v View) uncollectedCell(rec record.Record) cell {
-	out := rec.Uncollected()
-	if len(out) == 0 {
-		return of(faint, nothing)
-	}
-	c := of(plain, v.brief(out[len(out)-1].At))
-	if len(out) > 1 {
-		c = c.add(plain, fmt.Sprintf(" ×%d", len(out)))
-	}
-	return c
-}
-
 // boardRow is one session on the board before its title and note are cut to
 // the room there is.
 type boardRow struct {
@@ -72,7 +58,7 @@ func (v View) Board(w io.Writer, sessions []Session, ids bool) {
 	for _, l := range v.Labels {
 		header = append(header, of(v.hue(l.Name), l.Name))
 	}
-	header = append(header, of(plain, "no collect"), of(plain, "PR"))
+	header = append(header, of(plain, "PR"))
 
 	rows := make([]boardRow, len(sessions))
 	fixed := [][]cell{slices.Replace(slices.Clone(header), 1, 2, cell{})}
@@ -103,7 +89,7 @@ func (v View) Board(w io.Writer, sessions []Session, ids bool) {
 				}
 				prs = of(plain, strings.Join(numbers, " "))
 			}
-			r.cells = append(r.cells, v.uncollectedCell(rec), prs)
+			r.cells = append(r.cells, prs)
 			r.caveat = v.caveat(rec)
 		}
 		for len(r.cells) < len(header) {

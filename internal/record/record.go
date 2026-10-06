@@ -183,21 +183,6 @@ func (r Record) PullRequests() []Event { return r.of(PR) }
 // Compactions returns the compactions of the main conversation.
 func (r Record) Compactions() []Event { return r.of(Compaction) }
 
-// Uncollected returns the rounds this session dispatched for which the
-// transcript holds no collect, oldest first. It cannot tell a round still
-// running from one collected in another session or given up on. A dispatch
-// the session replaced under the same name is not one: the later dispatch is
-// the round.
-func (r Record) Uncollected() []Event {
-	var out []Event
-	for _, e := range r.Events {
-		if e.Waiting() {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
 // Waiting reports whether an event is a round this session dispatched that
 // the transcript holds nothing more of: no error from its run, no later
 // dispatch under its name, and no collect.

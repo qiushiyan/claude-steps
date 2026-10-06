@@ -14,14 +14,12 @@ import (
 	"github.com/qiushiyan/claude-steps/internal/panes"
 )
 
-// A label's cell is a date, never a judgement. This is the whole grammar,
-// and the grammar of the cell that dates the newest round with no collect.
+// A label's cell is a date, never a judgement. This is the whole grammar.
 const when = `(now|\d+(s|m|h|d|w|mo|y))`
 
 var (
-	cell        = regexp.MustCompile(`^(·|((read|pasted) )?` + when + `( \+\d+)?|named ` + when + `)$`)
-	uncollected = regexp.MustCompile(`^(·|` + when + `( ×\d+)?)$`)
-	columns     = regexp.MustCompile(` {2,}`)
+	cell    = regexp.MustCompile(`^(·|((read|pasted) )?` + when + `( \+\d+)?|named ` + when + `)$`)
+	columns = regexp.MustCompile(` {2,}`)
 )
 
 // Obligations 5, 10 and 12 on the board.
@@ -33,10 +31,10 @@ func TestBoard(t *testing.T) {
 	if len(rows) != 6 {
 		t.Fatalf("want a header and five panes (the pane with a malformed id is not a session):\n%s", out)
 	}
-	if got := columns.Split(rows[0], -1); !slices.Equal(got, []string{"pane", "session", "review", "verify", "prompts", "no collect", "PR", "note"}) {
+	if got := columns.Split(rows[0], -1); !slices.Equal(got, []string{"pane", "session", "review", "verify", "prompts", "PR", "note"}) {
 		t.Errorf("header: %q", got)
 	}
-	contains(t, rows[1], "work:1.1  The calendar walks days once  2h +1   15m +0    read 12m  ·           #7145")
+	contains(t, rows[1], "work:1.1  The calendar walks days once  2h +1   15m +0    read 12m  #7145")
 	contains(t, rows[2], "work:1.2", "named 3h")
 	contains(t, rows[3], "work:2.1", "no transcript", "transcript deleted, the PR was merged")
 	contains(t, rows[4], "work:2.2", "transcript unreadable")
@@ -54,9 +52,6 @@ func TestBoard(t *testing.T) {
 			if !cell.MatchString(cells[col]) {
 				t.Errorf("row %d, label %s: cell %q is not a date", i, header[col], cells[col])
 			}
-		}
-		if !uncollected.MatchString(cells[5]) {
-			t.Errorf("row %d: %q is not a date", i, cells[5])
 		}
 	}
 	// --ids: the pane id and the session id lead every row, and are empty on
@@ -134,10 +129,12 @@ func TestAPasteFromAProjectsFile(t *testing.T) {
 	contains(t, w.ok("show", "%7"),
 		"review    2 hours ago   1 commit since   /review full review.",
 		"verify    2 hours ago   1 commit since   pasted app-review-verify",
-		"  verify          2h   pasted app-review-verify\n",
-		"  review          2h   /review  full review.",
-		"  review verify   3h   pasted app-review-verify\n",
+		// The paste and the same paste typed as a command are one request:
+		// the command answers it under review, and under verify it waits.
+		"\n  review    2h   pasted app-review-verify → /review  full review.",
+		"\n  verify    2h   pasted app-review-verify\n",
 	)
+	lacks(t, w.ok("show", "%7"), "review verify")
 	// The paste names the skill its own command ran.
 	contains(t, w.ok("show", "%7", "--json"), `"name": "app-review-verify",`+"\n"+`      "command": "review"`)
 
@@ -185,19 +182,20 @@ func TestTheBoardClosesUpBeforeItRunsOver(t *testing.T) {
 		return out
 	}
 	// Room for the cells and a title: the columns stand two spaces apart.
-	out := board(120)
-	contains(t, out[0], "consult  spec       review  verify        docs  pr-review  prompts    no collect  PR")
-	contains(t, out[1], "·        pasted 3h  ·       pasted 3h +1  ·     ·          pasted 3h  ·           ·")
+	out := board(108)
+	contains(t, out[0], "consult  spec       review  verify        docs  pr-review  prompts    PR")
+	contains(t, out[1], "·        pasted 3h  ·       pasted 3h +1  ·     ·          pasted 3h  ·")
 	// No room at two spaces: one, with every cell whole and under its header.
-	out = board(100)
-	contains(t, out[0], "consult spec      review verify       docs pr-review prompts   no collect PR")
+	out = board(89)
+	contains(t, out[0], "consult spec      review verify       docs pr-review prompts   PR")
 	// The title takes back what closing up leaves over.
-	contains(t, out[1], "Rows keep the… ·       pasted 3h ·      pasted 3h +1 ·    ·         pasted 3h ·          ·")
+	contains(t, out[1], "Rows keep the… ·       pasted 3h ·      pasted 3h +1 ·    ·         pasted 3h ·")
 }
 
-// Colour is the same text painted: with the escapes removed it is the plain
-// output byte for byte. The popup reads through a pipe, so it asks for colour
-// in the environment, and the ids it acts on stay bare.
+// Colour is the same text painted: with the escapes and the head's glyphs
+// removed it is the plain output byte for byte. The popup reads through a
+// pipe, so it asks for colour in the environment, and the ids it acts on
+// stay bare.
 func TestColourIsTheSameTextPainted(t *testing.T) {
 	w := newWorld(t)
 	w.ok("note", "%1", "a note")
@@ -210,7 +208,7 @@ func TestColourIsTheSameTextPainted(t *testing.T) {
 		if escape.MatchString(bare) || !escape.MatchString(painted) {
 			t.Errorf("%v: colour without being asked, or none when asked:\n%q", args, painted)
 		}
-		if got := escape.ReplaceAllString(painted, ""); got != bare {
+		if got := glyph.ReplaceAllString(escape.ReplaceAllString(painted, ""), ""); got != bare {
 			t.Errorf("%v: the painted text differs from the plain:\n%s\n%s", args, got, bare)
 		}
 	}
@@ -230,8 +228,16 @@ func TestColourIsTheSameTextPainted(t *testing.T) {
 	contains(t, w.ok("show", "%1"),
 		"\x1b[34mreview\x1b[0m    2 hours ago      \x1b[1m1 commit since\x1b[0m",
 		"\x1b[35mverify\x1b[0m    15 minutes ago   0 commits since",
-		"  \x1b[34mreview\x1b[0m    3h    review-r1  /review  codex full review",
+		"  \x1b[34mreview\x1b[0m    3h    /review codex full review → review-r1",
 		"  \x1b[2mnote\x1b[0m      now   a note",
+	)
+	// The head marks each item with a glyph, in the item's hue or drawn back,
+	// and the title is strong.
+	contains(t, w.ok("show", "%1", "--head"),
+		"\x1b[1mThe calendar walks days once\x1b[0m   \x1b[2maaaaaaaa\x1b[0m   \x1b[36m\uf120 \x1b[0mwork:1.1\n",
+		"\x1b[34m\uf07c \x1b[0m\x1b[34m/work/app\x1b[0m   \x1b[35m\ue0a0 \x1b[0m\x1b[35mfeat/thing\x1b[0m   \x1b[2m\uf066 \x1b[0m1 compaction",
+		"\x1b[2m\uf017 \x1b[0mlast message",
+		"\x1b[32m\uf407 \x1b[0m\x1b[32mPR #7145 opened here\x1b[0m  https://github.com/acme/app/pull/7145\n",
 	)
 	contains(t, w.ok("show", "%5"), "\x1b[31m1 line could not be read\x1b[0m")
 	contains(t, w.ok("board", "--brief"), "\x1b[31mno transcript\x1b[0m  session cccccccc", "\x1b[31m!\x1b[0m app")
@@ -270,7 +276,7 @@ func TestTheBoardFitsTheWidth(t *testing.T) {
 				t.Errorf("at %d columns a row takes %d:\n%s", cols, screen.StringWidth(row), row)
 			}
 		}
-		contains(t, out[1], "2h +1   15m +0    read 12m  ·           #7145")
+		contains(t, out[1], "2h +1   15m +0    read 12m  #7145")
 		contains(t, out[2], "named 3h")
 		contains(t, out[5], "! app")
 		// A title in CJK takes two columns a character, and the columns
@@ -281,16 +287,16 @@ func TestTheBoardFitsTheWidth(t *testing.T) {
 		return out
 	}
 	// Room for everything: the note is cut only at its own limit.
-	out := rows(140)
+	out := rows(128)
 	contains(t, out[0], "note")
 	contains(t, out[1], "The calendar walks days once  ", "a long note that runs well past the edge of a n…")
 	// The title gives way first, then the note.
-	out = rows(110)
+	out = rows(98)
 	contains(t, out[1], "The calendar walks…  ", "a long note that runs well pas…")
-	out = rows(90)
+	out = rows(78)
 	contains(t, out[1], "The calendar w…  ", "a long note tha…")
 	// No room for a note: the column goes, and the mark stays.
-	out = rows(70)
+	out = rows(58)
 	lacks(t, out[0], "note")
 	lacks(t, out[1], "a long note")
 	contains(t, out[1], "The calenda…  ")

@@ -156,6 +156,9 @@ func lacks(t *testing.T, text string, unwanted ...string) {
 
 var escape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
+// glyph is a mark the head draws before an item when it paints.
+var glyph = regexp.MustCompile("[\uf120\uf07c\ue0a0\uf066\uf017\uf407] ")
+
 // columnOf is the screen column text starts at in line, counting a CJK
 // character as two.
 func columnOf(t *testing.T, line, text string) int {

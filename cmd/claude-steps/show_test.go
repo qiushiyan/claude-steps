@@ -21,20 +21,21 @@ func TestShow(t *testing.T) {
 	// where, and when the transcript last had a message.
 	contains(t, out,
 		"The calendar walks days once   aaaaaaaa   work:1.1\n"+
-			"/work/app  feat/thing   1 compaction, last 2 hours ago   last message 11 minutes ago   PR #7145 opened here  https://github.com/acme/app/pull/7145\n"+
+			"/work/app   feat/thing   1 compaction, last 2 hours ago   last message 11 minutes ago   PR #7145 opened here  https://github.com/acme/app/pull/7145\n"+
 			strings.Repeat("─", 72)+"\n",
 	)
 	// The label lines come first: the latest review event is the second
-	// dispatch, and one commit was made since.
+	// dispatch, and one commit was made since. How a round was dispatched and
+	// collected is the history's to say.
 	contains(t, out,
-		"review    2 hours ago      1 commit since    review-r2 collected 2 hours ago, envoy said partial\n"+
+		"review    2 hours ago      1 commit since    review-r2 envoy said partial\n"+
 			"verify    15 minutes ago   0 commits since   skill pl-loopy-verify local spikes\n"+
-			"prompts   12 minutes ago                     read skills/prompt-engineering/SKILL.md\n",
-		"no collect seen   ·\nnotes             none\n",
+			"prompts   12 minutes ago                     read skills/prompt-engineering/SKILL.md\n"+
+			"\nnotes   none\n",
 	)
 	// The steps, newest first: what is under a label, a round as one line at
-	// its dispatch with the skill run before it, and the commits between as a
-	// count.
+	// its dispatch with the command that asked for it, and the commits between
+	// as a count.
 	contains(t, out, `
 steps
   prompts   12m   read skills/prompt-engineering/SKILL.md
@@ -42,11 +43,11 @@ steps
                   1 commit
   review    2h    review-r2  envoy said partial
                   1 commit
-  review    3h    review-r1  /review  codex full review
+  review    3h    /review codex full review → review-r1
 
 11 rows in the full history (show --all)
 `)
-	lacks(t, out, "compaction (manual)", "commit  ", "history\n", "dispatched", "  collected")
+	lacks(t, out, "compaction (manual)", "commit  ", "history\n", "dispatched", "collected", "no collect seen")
 
 	// --all prints the whole timeline in the steps' place, and the footer's
 	// count is the rows it holds.
@@ -89,8 +90,8 @@ steps
 }
 
 // A round collected long after its dispatch is one step, dated at the
-// dispatch as its label is: the code the reviewer read. The label's row and
-// the full history say when the collect happened.
+// dispatch as its label is: the code the reviewer read. The full history says
+// when the collect happened.
 func TestARoundIsOneStepAtItsDispatch(t *testing.T) {
 	w := newWorld(t)
 	id := fixture.ID("ffffffff")
@@ -101,7 +102,7 @@ func TestARoundIsOneStepAtItsDispatch(t *testing.T) {
 	tr.Write(t, w.projects, "-work-app", id)
 	contains(t, w.ok("show", id),
 		"\nsteps\n  review   3h   review-r7  envoy said partial\n\n",
-		"3 hours ago   0 commits since   review-r7 collected 15 minutes ago, envoy said partial\n",
+		"3 hours ago   0 commits since   review-r7 envoy said partial\n",
 	)
 	contains(t, w.ok("show", id, "--all"),
 		"  review   15m   review-r7  collected, envoy said partial\n"+
@@ -109,9 +110,10 @@ func TestARoundIsOneStepAtItsDispatch(t *testing.T) {
 	)
 }
 
-// Under a label that lists rounds a step is a round. The latest skill run
-// before a round is on the round's line; a run no round took keeps a line of
-// its own, and a round that followed another has nothing to carry.
+// Under a label that lists rounds a step is a round. The skill's runs since
+// the label's last round are the round's, and the latest command typed among
+// them is on its line; a run no round took keeps a line of its own, and a
+// round that followed another has nothing to carry.
 func TestARoundCarriesTheSkillRunBeforeIt(t *testing.T) {
 	w := newWorld(t)
 	id := fixture.ID("abab5656")
@@ -129,19 +131,63 @@ func TestARoundCarriesTheSkillRunBeforeIt(t *testing.T) {
 	out := w.ok("show", id)
 	contains(t, out, `
 steps
-  review   3h   review-r0  no dispatch seen
+  review   3h   review-r0
   verify   3h   skill pl-loopy-verify  spikes
-  review   3h   review-r2  no collect seen
+  review   3h   review-r2
                 1 commit
-  review   3h   review-r1  /review  codex full
+  review   3h   /review codex full → review-r1
                 1 commit
-  review   3h   /review  goal
 
 `)
+	lacks(t, out, "goal", "no dispatch seen", "no collect seen")
 	// The history keeps every line the steps folded.
 	all := w.ok("show", id, "--all")
 	contains(t, all, "review-r1  collected\n", "review-r1  dispatched\n", "/review  codex full\n", "/review  goal\n")
 	lacks(t, all, "no dispatch seen")
+
+	// A skill run after the last round is a line of its own.
+	tr.Slash("review", "one more", "/home/u/.claude/skills/review")
+	tr.Write(t, w.projects, "p", id)
+	contains(t, w.ok("show", id), "\nsteps\n  review   3h   /review  one more\n  review   3h   review-r0\n")
+}
+
+// A request under a label is said on the step that answered it: the first
+// run or round under that label made in the same prompt. Asked in one prompt
+// and run in a later one, the two are lines of their own, and the same
+// request sent twice before anything answered it is one.
+func TestARequestIsSaidOnTheStepThatAnsweredIt(t *testing.T) {
+	w := newWorld(t)
+	projectSnippets(t, w)
+	id := fixture.ID("babe1234")
+	tr := fixture.New()
+	tr.Prompt("<pasted_content id=\"1\">\n/review " + reviewVerify + "\n</pasted_content>")
+	tr.SkillCall("review", "codex full review", "p1", false)
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.SkillCall("pl-loopy-verify", "spikes on the local rig", "p1", false)
+	tr.Bash(`git commit -q -m "fix"`, "")
+	tr.Prompt("now follow the prompt-engineering skill")
+	tr.Read("/home/u/.claude/skills/prompt-engineering/SKILL.md", false)
+	tr.Prompt("have we run pl-loopy-verify yet?")
+	tr.Prompt("go on")
+	tr.SkillCall("pl-loopy-verify", "again", "p4", false)
+	tr.Prompt(promptCheck)
+	tr.Prompt(promptCheck)
+	tr.Write(t, w.projects, "p", id)
+	out := w.ok("show", id)
+	contains(t, out, `
+steps
+  prompts   3h   pasted app-prompt-check
+  verify    3h   skill pl-loopy-verify  again
+  verify    3h   you: "have we run pl-loopy-verify yet?"
+  prompts   3h   you: "now follow the prompt-engineerin…" → read skills/prompt-engineering/SKILL.md
+                 1 commit
+  verify    3h   pasted app-review-verify → skill pl-loopy-verify  spikes on the local rig
+  review    3h   pasted app-review-verify → review-r1
+
+`)
+	lacks(t, out, "skill review", "times)")
+	// The full history keeps each at its own time.
+	contains(t, w.ok("show", id, "--all"), "  review verify   3h   pasted app-review-verify\n", "  prompts         3h   pasted app-prompt-check  (2 times)\n")
 }
 
 // A name dispatched again before any collect is one round: envoy collects a
@@ -158,14 +204,9 @@ func TestANameDispatchedAgainIsOneRound(t *testing.T) {
 	tr.Write(t, w.projects, "p", id)
 	w.panes = []panes.Pane{{ID: "%9", Where: "x:1.1", SessionID: id}}
 	out := w.ok("show", id)
-	contains(t, out,
-		"no collect seen   3 hours ago   review-r5\nnotes",
-		"\nsteps\n  review   3h   review-r5  dispatched 2 times, no collect seen\n  review   3h   review-r4  dispatched 2 times\n\n",
-	)
+	contains(t, out, "\nsteps\n  review   3h   review-r5\n  review   3h   review-r4\n\n")
+	lacks(t, out, "dispatched", "no collect seen")
 	contains(t, w.ok("show", id, "--all"), "review-r4  dispatched  (2 times)\n")
-	if cells := columns.Split(strings.Split(w.ok("board"), "\n")[1], -1); cells[5] != "3h" {
-		t.Errorf("the board counts a name dispatched again once: %q", cells)
-	}
 }
 
 // A run that returned an error keeps a line of its own and takes no count
@@ -187,13 +228,13 @@ func TestARunThatReturnedAnError(t *testing.T) {
 	tr.BashError(run, "envoy: unknown voice")
 	tr.Bash(run, "Command running in background")
 	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "ok"))
-	contains(t, show(tr), "\nsteps\n  review   3h   review-r1  dispatched 2 times\n  review   3h   review-r1  run returned an error\n\n")
+	contains(t, show(tr), "\nsteps\n  review   3h   review-r1\n  review   3h   review-r1  run returned an error\n\n")
 
 	tr = fixture.New()
 	tr.BashError(run, "job: /jobs/app-1/review-r1\nprovider: codex\nstatus: timeout — the turn hit its cap\n")
 	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "timeout"))
 	contains(t, show(tr),
-		"review    3 hours ago   0 commits since   review-r1 collected 3 hours ago, envoy said timeout\n",
+		"review    3 hours ago   0 commits since   review-r1 run returned an error, collected, envoy said timeout\n",
 		"\nsteps\n  review   3h   review-r1  run returned an error, collected, envoy said timeout\n\n",
 	)
 	contains(t, show(tr, "--all"), "  review   3h   review-r1  collected, envoy said timeout\n  review   3h   review-r1  run returned an error\n")
@@ -205,13 +246,14 @@ func TestARunThatReturnedAnError(t *testing.T) {
 	tr.BashError(run, "envoy: unknown voice")
 	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "partial"))
 	contains(t, show(tr),
-		"review    3 hours ago   0 commits since   review-r1 collected, envoy said partial\n",
-		"\nsteps\n  review   3h   review-r1  envoy said partial, no dispatch seen\n  review   3h   review-r1  run returned an error\n\n",
+		"review    3 hours ago   0 commits since   review-r1 envoy said partial\n",
+		"\nsteps\n  review   3h   review-r1  envoy said partial\n  review   3h   review-r1  run returned an error\n\n",
 	)
 }
 
-// A round under two labels carries the latest skill run before it under
-// either, not the run of the label the configuration lists first.
+// A round under two labels takes the skill runs before it under either, and
+// says the latest command typed, not the one of the label the configuration
+// lists first.
 func TestARoundUnderTwoLabelsCarriesTheLatestRun(t *testing.T) {
 	w := newWorld(t)
 	fixture.WriteFile(t, filepath.Join(w.home, ".config", "claude-steps", "config.toml"), []byte(`
@@ -231,7 +273,7 @@ jobs = ["review-"]
 	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/p.md", "Command running in background")
 	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "ok"))
 	tr.Write(t, w.projects, "p", id)
-	contains(t, w.ok("show", id), "\nsteps\n  review docs   3h   review-r1  /update-docs  newer\n  review        3h   /review  older\n\n")
+	contains(t, w.ok("show", id), "\nsteps\n  review docs   3h   /update-docs newer → review-r1\n\n")
 }
 
 // Obligation 17: --json carries timestamps and nothing relative.
@@ -300,7 +342,7 @@ func TestUnreadTranscriptsSayWhy(t *testing.T) {
 
 	// What the view may lack is said under the header, before the labels.
 	partial := w.ok("show", "%5")
-	contains(t, partial, "/work/app  feat/thing   last message 3 hours ago\n1 line could not be read\n─", "/review")
+	contains(t, partial, "/work/app   feat/thing   last message 3 hours ago\n1 line could not be read\n─", "/review")
 
 	// A transcript that was read and holds nothing says so in its own words.
 	fresh := fixture.ID("f0f0f0f0")
@@ -346,22 +388,23 @@ func TestRepeatedLinesAreOneLine(t *testing.T) {
 	tr.Write(t, w.projects, "p", id)
 	contains(t, w.ok("show", id), "/review  codex\n                1 commit\n  review   3h   /review  codex  (3 times)\n")
 
-	// Equal words under other labels are another line. A paste typed as its
-	// own command is under verify alone, and the same paste as text is under
-	// review too.
+	// A paste sent as text and then as its own command is one request. Under
+	// review the command answers it; under verify, where the command runs
+	// nothing, it waits for a run.
 	projectSnippets(t, w)
 	tr = fixture.New()
 	tr.Prompt("/review " + reviewVerify)
 	tr.Slash("review", reviewVerify, "/home/u/.claude/skills/review")
 	tr.Write(t, w.projects, "p", id)
 	out = w.ok("show", id)
-	contains(t, out, "  verify          3h   pasted app-review-verify\n  review verify   3h   pasted app-review-verify\n")
-	lacks(t, out, "times)")
+	contains(t, out, "\nsteps\n  review   3h   pasted app-review-verify → /review  full review. While you wait",
+		"\n  verify   3h   pasted app-review-verify\n\n")
+	lacks(t, out, "times)", "review verify")
 }
 
-// A round dispatched here with no collect in the transcript is listed under
-// the labels, whatever ran after it and whether or not a label lists it. The
-// label's own row would hide it behind a later round.
+// How a round was dispatched and collected is not a view's to say: a round is
+// its name among the steps and in its label's row, and the full history
+// keeps the dispatch and the collect.
 func TestRoundsWithNoCollectSeen(t *testing.T) {
 	w := newWorld(t)
 	id := fixture.ID("ababab12")
@@ -377,24 +420,16 @@ func TestRoundsWithNoCollectSeen(t *testing.T) {
 
 	out := w.ok("show", id)
 	contains(t, out,
-		"review    2 hours ago   0 commits since   review-r2 collected 2 hours ago\n",
-		"no collect seen   3 hours ago   spike-r1\n                  3 hours ago   review-r1\nnotes",
-		// A run that returned an error is not waiting for a collect.
-		"  review   2h   review-r3  run returned an error\n  review   2h   review-r2\n  review   3h   review-r1  no collect seen\n",
+		"review    2 hours ago   0 commits since   review-r2\n",
+		"  review   2h   review-r3  run returned an error\n  review   2h   review-r2\n  review   3h   review-r1\n",
 	)
 	// The round no label lists is not a step; the count tells the reader
 	// there is more.
-	lacks(t, out, "spike-r1  dispatched")
-	contains(t, w.ok("show", id, "--all"), "           3h   spike-r1  dispatched\n")
-	contains(t, w.ok("board"), "x:1.1  app      2h +0   ·       ·        3h ×2")
-
-	// The newest three, and how many more.
-	many := fixture.New()
-	for _, name := range []string{"a", "b", "c", "d", "e"} {
-		many.Bash("envoy run job-"+name+" --with codex --prompt-file /tmp/p.md", "Command running in background")
-	}
-	many.Write(t, w.projects, "p", id)
-	contains(t, w.ok("show", id), "no collect seen   3 hours ago   job-e\n                  3 hours ago   job-d\n                  3 hours ago   job-c\n                  2 more\n")
+	lacks(t, out, "spike-r1", "no collect seen", "dispatched", "collected")
+	contains(t, w.ok("show", id, "--all"), "           3h   spike-r1  dispatched\n", "  review   2h   review-r2  collected\n")
+	board := w.ok("board")
+	contains(t, board, "x:1.1  app      2h +0   ·       ·        ·\n")
+	lacks(t, board, "no collect", "×")
 }
 
 // The commits around the steps are counted wherever they fall: after the
@@ -476,7 +511,7 @@ func TestNoLabelsShowTheHistory(t *testing.T) {
 	out := w.ok("show", "%1")
 	contains(t, out, "\nhistory\n", "commit  docs: the stories on the local rig")
 	lacks(t, out, "steps\n", "in the full history")
-	if got := columns.Split(strings.SplitN(w.ok("board"), "\n", 2)[0], -1); !slices.Equal(got, []string{"pane", "session", "no collect", "PR", "note"}) {
+	if got := columns.Split(strings.SplitN(w.ok("board"), "\n", 2)[0], -1); !slices.Equal(got, []string{"pane", "session", "PR", "note"}) {
 		t.Errorf("header: %q", got)
 	}
 }
@@ -505,12 +540,12 @@ func TestTheSessionViewFitsTheWidth(t *testing.T) {
 	// on one, newest first, and a link is never cut: one with no room beside
 	// its name takes a line of its own.
 	w.env = map[string]string{"COLUMNS": "40"}
-	contains(t, w.ok("show", id), "/work/app  feat/thing\nlast message 3 hours ago\nPR #12 opened here\nhttps://github.com/acme/app/pull/12\n"+strings.Repeat("─", 40)+"\n")
+	contains(t, w.ok("show", id), "/work/app   feat/thing\nlast message 3 hours ago\nPR #12 opened here\nhttps://github.com/acme/app/pull/12\n"+strings.Repeat("─", 40)+"\n")
 	tr.Compaction("manual", false, "summary")
 	tr.Raw(fixture.Row{"type": "pr-link", "prNumber": 13, "prUrl": "https://github.com/acme/app/pull/13", "prRepository": "acme/app"})
 	tr.Write(t, w.projects, "p", id)
 	w.env = map[string]string{"COLUMNS": "100"}
-	contains(t, w.ok("show", id), "/work/app  feat/thing   1 compaction, last 3 hours ago   last message 3 hours ago\n"+
+	contains(t, w.ok("show", id), "/work/app   feat/thing   1 compaction, last 3 hours ago   last message 3 hours ago\n"+
 		"PR #13 linked  https://github.com/acme/app/pull/13\n"+
 		"PR #12 opened here  https://github.com/acme/app/pull/12\n"+strings.Repeat("─", 100)+"\n")
 }
@@ -533,7 +568,7 @@ func TestTheHeadAndTheTimelineApart(t *testing.T) {
 	for _, text := range []string{"second", "third", "fourth"} {
 		w.ok("note", "%1", text)
 	}
-	contains(t, w.ok("show", "%1", "--head"), "notes             now   fourth\n                  now   third\n                  now   second\n                  1 earlier\n")
+	contains(t, w.ok("show", "%1", "--head"), "notes   now   fourth\n        now   third\n        now   second\n        1 earlier\n")
 	all := w.ok("show", "%1", "--head", "--all")
 	contains(t, all, "now   a note\n")
 	lacks(t, all, "earlier")
@@ -568,12 +603,12 @@ func TestANarrowHead(t *testing.T) {
 		}
 	}
 	contains(t, out,
-		"The calendar walks days once   aaaaaaaa\nwork:1.1\n/work/app  feat/thing\n1 compaction, last 2 hours ago\nlast message 11 minutes ago\n"+
+		"The calendar walks days once   aaaaaaaa\nwork:1.1\n/work/app   feat/thing\n1 compaction, last 2 hours ago\nlast message 11 minutes ago\n"+
 			"PR #7145 opened here\nhttps://github.com/acme/app/pull/7145\n"+strings.Repeat("─", 48)+"\n",
-		"review    2h    +1   review-r2 collected 2h ago…\n"+
+		"review    2h    +1   review-r2 envoy said parti…\n"+
 			"verify    15m   +0   skill pl-loopy-verify loca…\n"+
 			"prompts   12m        read skills/prompt-enginee…\n",
-		"notes             now   the spike covered the v…\n",
+		"notes   now   the spike covered the verify pass…\n",
 	)
 	lacks(t, out, " ago   ", "commit since", "steps")
 
@@ -583,7 +618,7 @@ func TestANarrowHead(t *testing.T) {
 	fixture.New().Title("A title far longer than the narrow head beside the steps").Prompt("start").Write(t, w.projects, "p", id)
 	w.ok("note", id, "see https://github.com/acme/app/pull/7145#discussion_r1")
 	w.env = map[string]string{"COLUMNS": "40"}
-	contains(t, w.ok("show", id, "--head"), "A title far longer than the narrow head…\n4e4e4e4e\n", "notes             now   see https://git…\n")
+	contains(t, w.ok("show", id, "--head"), "A title far longer than the narrow head…\n4e4e4e4e\n", "notes   now   see https://github.com/ac…\n")
 	contains(t, w.ok("show", id, "--no-head"),
 		"  note   now   see\n"+
 			"               https://github.com/acme/a\n"+
@@ -595,7 +630,9 @@ func TestANarrowHead(t *testing.T) {
 // it whole: no row runs past the width, a link or a warning wider than the
 // width is folded rather than cut, the path and the branch take a line each
 // when they do not fit one, a row gives its time as a cell does, and a note
-// is one line, cut, since the steps beside it keep its every word.
+// is one line, cut, since the steps beside it keep its every word. A glyph
+// before an item takes its room, and what an item folds starts under its
+// text.
 func TestTheHeadFitsTheSideColumn(t *testing.T) {
 	const url = "https://github.com/acme/an-application-with-a-long-name/pull/1234"
 	w := newWorld(t)
@@ -626,11 +663,19 @@ func TestTheHeadFitsTheSideColumn(t *testing.T) {
 		"/work/a-checkout-with-a-long-name\nfeat/a-branch-name\nlast message 3 hours ago\n",
 		"PR #1234 linked\n"+url[:44]+"\n"+url[44:]+"\n",
 		"the reader may have missed 1 × commit\n(claude-steps check)\n",
-		"no collect seen   3h   spike-review-r1\n"+
-			"notes             2h   the spike covered th…\n"+
-			"                       1 note line could not\n"+
-			"                       be read\n",
+		"notes   2h   the spike covered the verify p…\n"+
+			"             1 note line could not be read\n",
 	)
+	lacks(t, head, "spike-review-r1")
+	w.env["CLICOLOR_FORCE"] = "1"
+	painted := w.ok("show", id, "--head")
+	for _, row := range strings.Split(escape.ReplaceAllString(painted, ""), "\n") {
+		if screen.StringWidth(row) > 44 {
+			t.Errorf("a painted row takes %d columns:\n%s", screen.StringWidth(row), row)
+		}
+	}
+	contains(t, escape.ReplaceAllString(painted, ""), "\uf07c /work/a-checkout-with-a-long-name\n\ue0a0 feat/a-branch-name\n")
+	delete(w.env, "CLICOLOR_FORCE")
 
 	// The steps stand on their own: what the view may lack comes first, and
 	// the note keeps its every word, folded under its text.

@@ -11,9 +11,10 @@ import (
 
 // style is how a piece of text is drawn: an SGR parameter, or none.
 //
-// Hue is spent on label names and on problems, and on nothing else. Bold is
-// never combined with a hue: the terminal draws bold text in the theme's own
-// emphasis colour, and a hue under it would be lost.
+// Hue is spent on label names, on problems, and on the kind of each item in a
+// session's head (its pane, directory, branch and pull requests), and on
+// nothing else. Bold is never combined with a hue: the terminal draws bold
+// text in the theme's own emphasis colour, and a hue under it would be lost.
 type style string
 
 const (
