@@ -16,7 +16,7 @@ import (
 // the whole timeline.
 func (v View) Show(w io.Writer, s Session, history bool) {
 	v.Head(w, s, history)
-	if !readable(s.Record) {
+	if !readable(s.Record) && len(s.Record.Notes) == 0 {
 		return
 	}
 	fmt.Fprintln(w)
@@ -105,19 +105,20 @@ func (v View) warn(w io.Writer, lack string) {
 // with no head above them and no heading: a popup shows the head beside it
 // and names the timeline on its border. What the view may lack is said
 // first all the same, so the timeline stands on its own; a transcript that
-// cannot be read says so in the timeline's place.
+// cannot be read says so, above the notes it leaves.
 func (v View) Timeline(w io.Writer, s Session, history bool) {
-	if !readable(s.Record) {
+	if readable(s.Record) {
+		v.warn(w, v.caveat(s.Record))
+	} else {
 		fmt.Fprintln(w, v.paint(of(problem, unread(s.Record))))
-		return
 	}
-	v.warn(w, v.caveat(s.Record))
 	v.body(w, s.Record, history, false)
 }
 
 // body is the timeline under its heading: the steps, then how many rows the
 // full history holds; or with history, or with no label configured, the
-// whole timeline.
+// whole timeline. A transcript that cannot be read leaves the notes, which
+// outlive it, and nothing else.
 func (v View) body(w io.Writer, rec record.Record, history, heading bool) {
 	all := v.lines(rec)
 	head := func(name string) {
@@ -126,6 +127,7 @@ func (v View) body(w io.Writer, rec record.Record, history, heading bool) {
 		}
 	}
 	switch {
+	case len(all) == 0 && !readable(rec):
 	case len(all) == 0:
 		fmt.Fprintln(w, "no events in the transcript")
 	case history || len(v.Labels) == 0:
@@ -269,29 +271,32 @@ func more(text string) cell {
 func (v View) notes(rec record.Record, all, brief bool) []trow {
 	head := of(faint, "notes")
 	var rows []trow
-	add := func(text string, cells ...cell) {
-		rows = append(rows, trow{lead: append([]cell{head}, cells...), text: text})
+	add := func(r trow) {
+		r.lead = append([]cell{head}, r.lead...)
+		rows = append(rows, r)
 		head = cell{}
 	}
+	// What could not be read is folded, never cut.
+	warn := func(text string) { add(trow{text: text, style: problem, fold: true}) }
 	keep := len(rec.Notes)
 	if !all {
 		keep = min(keep, shown)
 	}
 	for i, n := range slices.Backward(rec.Notes) {
 		if len(rec.Notes)-i > keep {
-			add("", more(fmt.Sprintf("%d earlier", i+1)))
+			add(trow{lead: []cell{more(fmt.Sprintf("%d earlier", i+1))}})
 			break
 		}
-		add(oneLine(n.Text), of(plain, v.when(n.At, brief)))
+		add(trow{lead: []cell{of(plain, v.when(n.At, brief))}, text: oneLine(n.Text)})
 	}
 	if rec.UnreadNotes > 0 {
-		add("", cell{spans: []span{{plural(rec.UnreadNotes, "note line") + " could not be read", problem}}, wide: true})
+		warn(plural(rec.UnreadNotes, "note line") + " could not be read")
 	}
 	if rec.NotesError != "" {
-		add("", cell{spans: []span{{rec.NotesError, problem}}, wide: true})
+		warn(rec.NotesError)
 	}
 	if len(rows) == 0 {
-		add("", of(faint, "none"))
+		add(trow{lead: []cell{of(faint, "none")}})
 	}
 	return rows
 }

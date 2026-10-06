@@ -282,8 +282,21 @@ func TestUnreadTranscriptsSayWhy(t *testing.T) {
 	unreadable := w.ok("show", "%4")
 	contains(t, unreadable, "transcript unreadable", filepath.Join("-work-app", garbled+".jsonl"), "notes   none")
 	for _, out := range []string{missing, unreadable} {
-		lacks(t, out, "no events in the transcript", " ago", "steps", "no collect seen")
+		lacks(t, out, "no events in the transcript", " ago", "no collect seen")
 	}
+	lacks(t, unreadable, "steps")
+
+	// The notes outlive the transcript, so its steps are the notes, each
+	// whole however narrow the view.
+	w.ok("note", "%3", "the transcript went with the worktree, and the review it held had come back clean before the merge")
+	w.env = map[string]string{"COLUMNS": "44"}
+	for _, args := range [][]string{{"show", "%3"}, {"show", "%3", "--no-head"}, {"show", "%3", "--all"}} {
+		contains(t, w.ok(args...), "worktree, and the review it\n", "held had come back clean\n", "before the merge\n", "note   now   kept past the transcript\n")
+	}
+	if timeline := w.ok("show", "%3", "--no-head"); !strings.HasPrefix(timeline, "no transcript\n") {
+		t.Errorf("the steps of a missing transcript do not say so first:\n%s", timeline)
+	}
+	w.env = nil
 
 	// What the view may lack is said under the header, before the labels.
 	partial := w.ok("show", "%5")
@@ -600,7 +613,7 @@ func TestTheHeadFitsTheSideColumn(t *testing.T) {
 	tr.Write(t, w.projects, "p", id)
 	note := "the spike covered the verify pass, so skip it until the importer lands on the new schema"
 	fixture.WriteFile(t, filepath.Join(w.state, "notes", id+".jsonl"),
-		[]byte(fmt.Sprintf(`{"at":%q,"text":%q}`+"\n", w.now.Add(-2*time.Hour).Format(time.RFC3339), note)))
+		[]byte(fmt.Sprintf(`{"at":%q,"text":%q}`+"\n", w.now.Add(-2*time.Hour).Format(time.RFC3339), note)+"{not a note\n"))
 
 	w.env = map[string]string{"COLUMNS": "44"}
 	head := w.ok("show", id, "--head")
@@ -614,7 +627,9 @@ func TestTheHeadFitsTheSideColumn(t *testing.T) {
 		"PR #1234 linked\n"+url[:44]+"\n"+url[44:]+"\n",
 		"the reader may have missed 1 × commit\n(claude-steps check)\n",
 		"no collect seen   3h   spike-review-r1\n"+
-			"notes             2h   the spike covered th…\n",
+			"notes             2h   the spike covered th…\n"+
+			"                       1 note line could not\n"+
+			"                       be read\n",
 	)
 
 	// The steps stand on their own: what the view may lack comes first, and
