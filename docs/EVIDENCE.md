@@ -410,3 +410,113 @@ snippets.
   path that differs between the machines.
 - **Look at the two copies** if a session moved with `claude-tomini` shows a
   `you: "…"` line where the laptop showed a paste: the copies have parted.
+
+## 2026-10-06: one line for each thing that happened
+
+**Question.** The user opened the popup on a session that had run one review
+round and saw two `review` lines and two `verify` lines, the request and the
+run each a step, and read the steps, newest first, as review before spec. On
+the stacked layout the label rows were below the steps and cut off. What
+makes a label's lines count what happened under it, and what does the popup
+open on?
+
+**Corpus.** The transcripts last changed at or after 2026-09-21 13:00 local
+time, as in the pass of 2026-10-05: 394 on the laptop and 158 on the mini,
+written below in that order. Each was rendered with `show --json --all` and
+`show --no-head` at `COLUMNS=150` by the binary built at `ad77e1e` and by the
+one built at the pass's end, both under the labels of that day. 240 sessions
+hold a labelled step; 115 hold a review round and 102 a consult round. The
+live sessions of the mini were rendered in the popup at 140×32, 100×26 and
+156×37.
+
+### Findings
+
+- **A request and the run it asked for were two steps.** Of 307 requests
+  under a label (a paste, or a prompt that names a skill), the first run or
+  round under that label after them came in the same human prompt for 148, a
+  median of 10 seconds later (p90 2 minutes, at most 17). For 21 it came in a
+  later prompt, and 138 had none before the next request or the end of the
+  session. Examples: `8b475c03`, `5c89a1ed`.
+- **The prompt is the join.** A paste, the skill call the model made for it
+  and the `envoy run` after it share the prompt row's `promptId`; a task
+  notification starts a turn of its own with no human origin. 3 of the 21
+  later runs were the same paste sent again as its own command seconds after
+  (`a9eafb70`, `bc5bec79`, `d5ca20f7`).
+- **Every review and consult skill run dispatches a round,** so a run with no
+  round of its own was preparation for the next one. With requests joined,
+  12 of the 43 sessions whose `review` lines outnumbered their rounds still
+  did: a `cat` of the skill's file before the Skill call in the same prompt
+  (`13bbb6dc`, `d3894b2a`), `/review` typed twice before one round
+  (`17598d01`, `edd6b45a`), and a typed `/review` followed in the next prompt
+  by the model's own Skill call (`2c408cef`).
+- **The words of a round's mechanics said nothing the user reads the steps
+  for.** "dispatched", "collected", "no collect seen", "dispatched 2 times"
+  and "no dispatch seen" describe how a round ran.
+
+### Changed
+
+- **Each event knows the human prompt it came under** (`Event.Prompt`,
+  `decode.go`, `rounds.go`).
+- **A request is said on the step that answered it**, the first run or round
+  under its label in the same prompt or the slash command typed next, as
+  `pasted <key> → <what ran>`; the same request sent again before an answer
+  is one (`render.outline`).
+- **A round takes its label's runs and reads since the last round** and says
+  the latest request among them; with none, the model's words for the run.
+- **A round's line and its label's row are its name,** and what went wrong
+  where something did. The head has no "no collect seen" rows; the board's
+  column stays.
+- **The head marks its items** with a Nerd Font glyph and a hue each (pane,
+  directory, branch, pull request; compactions and the last message drawn
+  back), and its title is strong. Plain output has neither.
+- **In the dotfiles,** the stacked popup's panel is the whole view, the
+  status first, sized to hold the status of the session it opens on whole.
+
+### Measured after
+
+- **Step lines,** 240 sessions: 1458 to 1278. By label: review 284 to 240,
+  verify 106 to 71, prompts 178 to 127, docs 407 to 370, consult 196 to 187,
+  pr-review 204 to 201, spec 76 to 75, closeout 7 to 7. Per session median 5
+  to 4, p90 13 to 12, the longest 21 to 18.
+- **A label's lines against its rounds:** sessions where the `review` lines
+  outnumber the review rounds, 43 to 1 of 115; `consult`, 7 to 1 of 102. The
+  two left: a design prompt that quotes `/review` and is answered in a later
+  prompt (`fc3b83cb`), and the consult skill read twice after the last round
+  with no round after it (`3a8e018c`).
+- **A paste on a line alone:** 95 to 46, most of them `implement-spec`, which
+  no labelled skill answers. 242 lines say a request before what ran.
+- **`check`:** no drift over the mini's 114 transcripts of the last 7 days;
+  the human prompts the reader counts match the second trace, 374 and 374.
+- **The popup:** its test in the dotfiles passes, 12 of 12, on the mini's
+  installed binary. At 140×32 and 100×26 the stacked panel holds the status
+  of `8b475c03` whole, every label row before any scroll.
+
+### Decided by the user
+
+- **The popup opens on the status when it stacks,** whole, with the steps
+  under it.
+- **A label's lines count what happened under it,** and the request that
+  asked for it is said on that line. How a round was dispatched and collected
+  is left to the history.
+- **The head marks its items with glyphs and hues.**
+
+### Limits
+
+- Sessions were rendered and compared, and the popup captured; the user has
+  not read the new view yet.
+- A round is joined to its runs by order alone, since the label's last
+  round. A run that led nowhere hours before a round is folded into it.
+- The laptop's installed binary is the one built at `ad77e1e`.
+- A label whose latest event is a request still dates the request in its
+  row (`verify` in `8b475c03`): it reads `pasted`, with no run after it.
+
+### The next pass
+
+Compare sessions started after 2026-10-06 that hold a review round.
+
+- **Success:** a label's step lines count its rounds, and no request has a
+  line beside the run that answered it.
+- **Revise the prompt rule** if runs that answer a request in a later prompt,
+  other than a slash command, grow past the 21 of 307 here.
+- **Revise the round's reach** if a review run with no round of its own is
+  wanted among the steps.
