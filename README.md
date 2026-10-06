@@ -12,15 +12,14 @@ and tells the model nothing.
 ```text
 $ claude-steps show
 The calendar walks days once   9ba78130   work:2.1
-~/dev/app  feat/calendar   1 compaction, last 2 hours ago   last message 1 minute ago
+~/dev/app   feat/calendar   1 compaction, last 2 hours ago   last message 1 minute ago
 PR #7145 opened here  https://github.com/acme/app/pull/7145
 ────────────────────────────────────────────────────────────────────────
-review   2 hours ago      1 commit since    review-r2 collected 1 hour ago
+review   2 hours ago      1 commit since    review-r2
 verify   15 minutes ago   0 commits since   skill verify-local spikes
 docs     ·
 
-no collect seen   ·
-notes             1 hour ago   skip the docs pass
+notes   1 hour ago   skip the docs pass
 
 steps
   verify   15m   skill verify-local  spikes
@@ -28,14 +27,14 @@ steps
                  1 commit
   review   2h    review-r2
                  1 commit
-  review   3h    review-r1  /review  codex full review
+  review   3h    pasted review-verify → review-r1
 
 11 rows in the full history (show --all)
 
 $ claude-steps board
-pane      session                       review  verify  docs      no collect  PR     note
-work:2.1  The calendar walks days once  2h +1   15m +0  ·         ·           #7145  skip the docs pass
-work:2.2  Split the importer            ·       ·       named 3h  1h ×2       ·
+pane      session                       review  verify  docs      PR     note
+work:2.1  The calendar walks days once  2h +1   15m +0  ·         #7145  skip the docs pass
+work:2.2  Split the importer            ·       ·       named 3h  ·
 ```
 
 The view states dated facts. It does not say a check is finished or still
@@ -61,7 +60,8 @@ Without something setting it, the board is empty and `show <session id>`
 still works.
 
 The tmux popup (`prefix S`) shows one session's steps beside its status and
-a list of the other sessions. `show --no-head` prints the steps alone, or
+a list of the other sessions; a popup too small for that shows the status
+first, whole, with the steps under it. `show --no-head` prints the steps alone, or
 with `--all` the history, with no heading; `show --head` prints what comes
 before them; and `board --brief` prints each session as its pane, the age of
 its last message and its title, with no header line.
@@ -75,27 +75,22 @@ A session view reads from the top, newest first:
   each pull request the session opened or linked with its link, newest first.
   No `PR` there says the session has none. A transcript that could not be read
   in full says so on the next line.
-- **The labels:** one row for each, always: when its latest event happened,
-  the commits made since where the label counts them, and the event. For a
-  round the time and the count run from its dispatch, and `collected …` in
-  the row is the collect's own time. `·` says nothing in the session is
-  under the label.
-- **`no collect seen`:** the rounds this session dispatched for which the
-  transcript holds no collect, newest first, whether or not a label lists
-  them. Such a round may be running, collected from another session, or
-  given up on; the transcript cannot tell which. A dispatch replaced under
-  the same name is not listed: the later dispatch is the round. A run counts
-  as dispatched when its call returned no error, so one on a branch that was
-  skipped, or one envoy refused, is listed too. `·` says there is none.
+- **The labels:** one row for each, always: when its latest step happened,
+  the commits made since where the label counts them, and the step. For a
+  round the time and the count run from its dispatch. `·` says nothing in
+  the session is under the label.
 - **`notes`:** your latest notes, one line each, cut where the width is
   known. `show --all` lists every one.
-- **`steps`:** what ran under a label, and your notes at the time you wrote
-  them, each whole. A round is one step, at its dispatch, so the `review`
-  lines count the review rounds. The commits between two steps are one count
-  line, and so are those after the newest step and before the oldest; the
-  commits above a round were made after its dispatch. A run of the same line
-  under the same labels is one line, at the time of its last, with
-  `(3 times)`. The last line says how many rows the full history holds.
+- **`steps`:** what happened under each label, newest first, and your notes
+  at the time you wrote them, each whole. A step is what ran, said with the
+  request that asked for it, or a request nothing answered. A round is one
+  step, at its dispatch, and takes the skill's runs before it, so the
+  `review` lines count the review rounds. The commits between two steps are
+  one count line, and so are those after the newest step and before the
+  oldest; the commits above a round were made after its dispatch. A run of
+  the same line under the same labels is one line, at the time of its last,
+  with `(3 times)`. The last line says how many rows the full history
+  holds.
 - **`show --all`** prints that history in the steps' place: every line below,
   each with the labels it is under. With no label configured, `show` prints
   it too.
@@ -111,36 +106,36 @@ What a line says:
   may have been skipped, or whose output went to a pipe or a file, is not a
   read, and neither is a passage shown by `sed`, `head` or `grep`.
 - **`pasted <key>`:** a prompt holding the opening of a TabType snippet from
-  a file `snippets` names. It is a request: the skill it asks for has a line
-  of its own where the transcript holds its run or its read. A prompt typed
-  by hand with the same opening reads the same. A snippet that opens with a
-  slash command and arrives as that command is the `/review  args` line and
-  a `pasted` line at one time, and the paste is a step only under a label the
-  run is not under.
-- **`you: "…"`:** a prompt that named a labelled skill and ran nothing. Your
-  words, not a run.
-- **`review-r1`:** a round among the steps: an `envoy run` here and a
-  collect that returned a result. What differs is said after the name:
-  - **`no collect seen`:** the transcript holds no collect of it. A line
-    without these words was collected.
+  a file `snippets` names. A prompt typed by hand with the same opening reads
+  the same. A snippet that opens with a slash command and arrives as that
+  command is the `/review  args` line and a `pasted` line at one time, and
+  the paste is a step only under a label the run is not under.
+- **`you: "…"`:** a prompt that named a labelled skill. Your words, not a
+  run.
+- **`<request> → <what ran>`:** a paste, a prompt that named the skill, or a
+  slash command you typed, and the step under the same label that answered
+  it: the first run or round made in the same prompt, or the slash command
+  you typed next. On a line of its own a request is one nothing under the
+  label answered there; the same request sent again before an answer is
+  one. A transcript that marks no prompt as yours answers no request. Where
+  the width is short the request gives way to what ran, and is left out
+  before what ran is cut.
+- **`review-r1`:** a round among the steps, at its dispatch. It takes the
+  label's skill runs and reads since its last round, since every round the
+  skill runs is dispatched, and says the latest request among them or made
+  in its own prompt: `/review args → review-r1`. With no request it says
+  the model's own run: `review-r1  skill review  codex`. Runs and rounds are
+  joined by their order alone. What went wrong is said after the name:
   - **`envoy said partial`:** envoy's status for the job when it is not
     `ok`. `ok` says a result came back, not that a review passed.
   - **`collect returned an error`:** the collect call failed.
   - **`run returned an error`:** the call that ran envoy failed, and envoy
-    did not say the job ended `ok`. The round keeps a line of its own, and
-    says its collect in full when one followed: `run returned an error,
-    collected, envoy said timeout`.
-  - **`dispatched 2 times`:** the name was dispatched again before any
-    collect.
-  - **`no dispatch seen`:** the transcript holds no dispatch this collect
-    could have read.
-- **`review-r1  /review  args`:** the round, and the latest skill run before
-  it under any of its labels, unless an earlier round carries that run. The
-  round and the run are joined by their order alone. A skill run no round
-  carries keeps a line of its own.
+    did not say the job ended `ok`. The round keeps a line of its own, with
+    envoy's word when a collect followed: `run returned an error, envoy said
+    timeout`.
 - **`review-r1  dispatched` / `collected`:** the same round in the full
-  history, where the dispatch, the collect and the skill run each have a line
-  at their own time.
+  history, where the dispatch, the collect, the skill run and the request
+  each have a line at their own time.
 - **`commit  subject`:** a `git commit` in a call that returned no error. A
   commit that may have been skipped (after `||`, inside an `if` or a loop,
   in the background) counts only when git printed its `[branch sha]` line.
@@ -153,8 +148,7 @@ On the board a label's cell is the time of its latest event (`11m`, `2d`);
 for a round that is the dispatch. `+2` counts the commits made since that
 event started; `read`, `pasted` or `named` in front says the latest event was
 only a file read, only a pasted snippet, or only a prompt that named the
-skill; `·` says nothing matches. `no collect` holds the time of the newest
-round with no collect seen, and `×2` when there are two.
+skill; `·` says nothing matches.
 
 A transcript that cannot be read says so (`no transcript`,
 `transcript unreadable`, `3 lines could not be read`) and is never drawn as an
@@ -169,8 +163,11 @@ a session, and the words are in its note cell where there is room.
 
 Colour names and never grades. Each label's name has a hue; red marks an
 error the transcript reports and what the reader could not read; a count of
-commits is bold when there are any. Output is coloured on a terminal, or
-through a pipe with `CLICOLOR_FORCE=1`, and never with `NO_COLOR` set.
+commits is bold when there are any. In the header the pane, the directory,
+the branch and each pull request carry a Nerd Font glyph and a hue of their
+own, and the title is bold. Output is coloured on a terminal, or through a
+pipe with `CLICOLOR_FORCE=1`, and never with `NO_COLOR` set; plain output has
+no glyphs.
 
 With `COLUMNS` set, a view fits that width: an event's text is cut to one
 line, and a note in the steps is folded onto the lines under it. The part
@@ -188,8 +185,8 @@ Not shown: commits made by a subagent, by `git merge`, `rebase` or
 ## Configuration
 
 `~/.config/claude-steps/config.toml`, optional. The binary ships no labels;
-with no file the board shows sessions, rounds with no collect, pull requests
-and notes, and `show` prints the whole timeline.
+with no file the board shows sessions, pull requests and notes, and `show`
+prints the whole timeline.
 
 ```toml
 projects_dir = "~/.claude/projects"            # default

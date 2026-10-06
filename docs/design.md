@@ -15,14 +15,21 @@ tells the model nothing.
   when. An invocation does not prove a check finished or still covers the
   code, so nothing prints a tick, "done" or "stale"; the user judges. Colour
   is under the same stand: a hue names a label, red marks an error the
-  transcript reports or something unread, weight marks a count of commits
-  that is not zero, and nothing grades a date.
+  transcript reports or something unread, a hue and a glyph mark the kind of
+  an item in a session's head, weight marks a count of commits that is not
+  zero, and nothing grades a date.
 - **Unknown is shown as unknown.** A line that does not decode, a file or a
   directory that cannot be read and a fact the reader may have missed are
   all said at the top of the view, because a silent skip reads as "nothing
   ran". The steps leave rows to the full history and say how many it holds.
 - **One reader.** Every command gets a session from `record.Loader.Load`, so
-  the board and the session view cannot disagree.
+  the board and the session view cannot disagree, and what happened under a
+  label is read once, by `record.Steps`, so a label's row and its steps
+  cannot either.
+- **What happened, not how.** A label's steps count what happened under it,
+  each with the request that asked for it. How a round was dispatched and
+  collected, and which load of a skill led to it, is the full history's to
+  say.
 
 ## Flow
 
@@ -30,7 +37,7 @@ tells the model nothing.
 tmux pane option @claude_ctx_sid → session id
 session id → <id>.jsonl in any project directory → decode → events, signals, read status
 session id → notes/<id>.jsonl                             → notes
-record, labels → label states, each event's labels → text or JSON
+record, labels → steps → label states, the steps' lines → text or JSON
 ```
 
 Nothing persists between invocations except the notes.
@@ -60,9 +67,14 @@ Nothing persists between invocations except the notes.
 - **`internal/record/load.go`:** where transcripts live, the read status, and
   turning what the user typed into a session id.
 - **`internal/record/labels.go`:** which labels an event is under
-  (`LabelsOf`), a label's latest event and the commits since. A label is a
-  board column with no state, and labels are not exclusive: a label's row and
-  a session's steps read the one membership rule.
+  (`LabelsOf`, `belongs`), and a label's state: its latest step and the
+  commits since. A label is a board column with no state, and labels are not
+  exclusive.
+- **`internal/record/steps.go`:** what happened under each label
+  (`Steps`): which run or round answered which request, and which runs a
+  round took. Each label is read on its own and the steps are merged by
+  event, so a run under two labels that a round of one takes is still a step
+  under the other. Render formats the steps and decides none of them.
 - **`internal/config`:** which files hold snippets, and what a snippet is
   reduced to: its key and the opening of its text. `loadSnippets` is the one
   reader of TabType's file. The set is built from the configuration alone
@@ -76,39 +88,44 @@ Nothing persists between invocations except the notes.
   current time, the labels, the width to fill and whether to paint are passed
   in. It works out a session's label states from those labels, so a board's
   header and its cells have one source. It owns the layers of a session
-  view, which lines are steps, every style, and the fit to a width. A view
-  is its head (what the session is, its labels, the rounds with no collect
-  seen, the notes) and its timeline, and each prints alone. The head fits a
-  narrow width whole: an item folds rather than run past, a row's text is
-  cut to its room, and a note is one line there, since the steps keep it
-  whole. The timeline gives an event's text a floor of room and lets the
-  line run past it, since the popup wraps it. A line is built from cells
-  that carry their text and their style apart, so alignment measures text
-  alone and the plain output is the painted output with the escapes removed.
+  view, every style and glyph, and the fit to a width. A view is its head
+  (what the session is, its labels, the notes) and its timeline, and each
+  prints alone. The head fits a narrow width whole: an item folds under its
+  text rather than run past, a row's text is cut to its room, and a note is
+  one line there, since the steps keep it whole. The timeline gives an
+  event's text a floor of room and lets the line run past it, since the
+  popup wraps it; a step's request takes the room what ran leaves it. A
+  line is built from cells that carry their text and their style apart, so
+  alignment measures text alone and the plain output is the painted output
+  with the escapes and the head's glyphs removed.
 - **The popup:** `~/dotfiles/tmux/.config/tmux/scripts/tmux-steps.sh`. It
   owns fzf, keys and pane switching and shows only what the binary prints.
   It lays one session out as lazygit does: the steps (`show --no-head`) in
   the main panel, the head (`show --head`) above the session list
-  (`board --brief`) in a side column. It reads the binary through a pipe,
-  so it asks for colour and gives each call its width. `steps.md` beside it
-  holds its design.
+  (`board --brief`) in a side column. A popup too small for the column shows
+  the whole view (`show`) on top, the head first and whole, above the list.
+  It reads the binary through a pipe, so it asks for colour and gives each
+  call its width. `steps.md` beside it holds its design.
 
 ## The model
 
 - **Event:** one dated fact. The kinds are the `Kind` constants in
   `internal/record/record.go`; an event's time is its row's, and for a tool
-  call that is the call.
+  call that is the call. An event knows the human prompt it came under
+  (`Event.Prompt`): the prompt's own events and what the session did until
+  the next one. A task notification starts a turn but no prompt, since a run
+  that answers a paste often comes after the background round the paste
+  started; a slash command the user typed is a prompt.
 - **Round:** an envoy job as the transcript shows it: a dispatch, a collect,
   or both. A collect belongs to the round its name read when its command
   ran, and takes its own block of the call's output, so a call's collects
   each keep their own status and a dispatch later in the call is a new
   round. A dispatch under a name whose round is still waiting for a collect
-  replaces that round (`Redispatched`) and says how many dispatches it
-  stands for.
-- **Label state:** the latest matching event that did not fail, and the
+  replaces that round (`Redispatched`, `Event.Waiting`) and counts the
+  dispatches it stands for.
+- **Label state:** the label's latest step that did not fail, and the
   commits made after it started. For a round that start is the dispatch: a
-  reviewer reads the code as it stood then; the label's row says when the
-  collect happened. A round whose run returned an error did not fail once it
+  reviewer reads the code as it stood then. A round whose run returned an error did not fail once it
   was collected: a result came back. A prompt that only names a skill counts
   when nothing else matches, and never gets a commit count. A paste counts
   as a run does: it dates the label and starts the count. It is a request
@@ -116,30 +133,32 @@ Nothing persists between invocations except the notes.
 - **Paste:** a prompt that holds a snippet's opening, typed as text or as a
   slash command with its arguments. As a command that loaded its skill it is
   the paste and the run, each an event at that time. Under a label that
-  lists the command's skill the run is the prompt's one line, and the paste
-  is a step under any other label that lists its key. A pasted prompt is not
-  read for the skills it names.
-- **Step:** an event under a label, or a note. A session view lists the
-  steps newest first, with the commits between two as one count line; every
-  other line is in the full history (`show --all`). The view is opened to ask
-  whether a labelled step ran and what was committed since, and the steps
-  are that answer in order.
+  lists the command's skill the run is the prompt's one line, and under any
+  other label that lists its key the paste is a request. A pasted prompt is
+  not read for the skills it names.
+- **Request:** a paste, or a prompt that names a labelled skill; a slash
+  command the user typed is a request and its run at once. A request under a
+  label is answered by the first run, read or round under that label in the
+  same human prompt, or by the slash command typed in the next one, and is
+  said on that step's line. The same request sent again before an answer is
+  one. A request with no known prompt (a transcript that marks none as the
+  user's) is answered by nothing.
+- **Step:** what happened under a label: a run, a read or a round, with the
+  request it answered, or a request nothing answered; and the user's notes.
+  A session view lists the steps newest first, with the commits between two
+  as one count line; every other line is in the full history
+  (`show --all`). The view is opened to ask whether a labelled step happened
+  and what was committed since, and the steps are that answer in order.
 - **A round is one step.** Under a label that lists rounds, its lines count
   the rounds run. The line is dated at the dispatch, like the label, so the
-  commits above it are the ones its reviewer did not read. It says what the
-  transcript holds only where that is not one dispatch and a collect that
-  returned a result; a run that returned an error is such a case, so its
-  line says the collect in full. It takes the place of the latest skill run
-  before it under any of its labels, unless an earlier round took that run,
-  and carries the run's words. The join is by order alone, so no line says a
-  skill run caused a round. A replaced dispatch has no line. The full
-  history keeps the dispatch, the collect and the skill run apart.
-- **Uncollected round:** a round this session dispatched for which the
-  transcript holds no collect. It is listed apart from the labels, because a
-  label state keeps only its latest event and a round no label lists has no
-  row. The words are "no collect seen": the round may be running, collected
-  from another session, or given up on. A replaced dispatch is not one, and
-  neither is a run that returned an error (`Event.Waiting`).
+  commits above it are the ones its reviewer did not read. Every round such
+  a skill runs is dispatched, so the label's runs and reads since its last
+  round are this round's and have no line: the round says the latest request
+  among them or made in its own prompt, and with none the model's words for
+  the latest run. The join is by order alone. It says what went wrong, if
+  anything: a run or a collect that returned an error, envoy's word for a job
+  that did not end `ok`. A replaced dispatch has no line. The full history
+  keeps the dispatch, the collect, the runs and the requests apart.
 - **Read status:** `ok`, `partial`, `unreadable`, `missing`. `missing` says
   every directory that could hold the transcript was looked in; one that
   could not be is `unreadable`, with its path. Neither renders as an empty
@@ -231,6 +250,9 @@ Nothing persists between invocations except the notes.
   fixed line limit.
 - **Claude Code sets copies aside under longer names.** The transcript is
   found by its whole file name.
+- **The head's glyphs are a Nerd Font's.** The terminals in use carry one and
+  measure each glyph one column, as `internal/render` does; whatever reads
+  plain output may not, so the glyphs are drawn only with the colour.
 
 ## Alternatives this design beats
 
@@ -247,21 +269,32 @@ Nothing persists between invocations except the notes.
   drift.
 - **Hue by state,** a traffic light on the commits since: a verdict made with
   colour.
-- **A word in a label's cell for a round with no collect** ("out"): it claims
-  a present state the transcript cannot show, an older such round hides
-  behind the label's latest event, and a round no label lists has no cell.
+- **Saying how a round ran** ("no collect seen", "dispatched 2 times", a
+  board column for the rounds with no collect): the steps are read for what
+  happened, and a dispatch the transcript shows no collect of is most often
+  one replaced or collected elsewhere (`docs/EVIDENCE.md`). The full history
+  keeps both.
+- **A request joined to the next run by order alone:** a prompt that names
+  a skill in passing would be said on a run hours and prompts later
+  (`docs/EVIDENCE.md`). The prompt bounds the join; a round's runs are
+  joined by order, since the skill dispatches every round it runs.
+- **The steps read in render beside the label states in record:** the two
+  answered "what happened under this label" apart, and a run a round of one
+  label took vanished from another label's steps while its row still showed
+  it.
 - **A short timeline that keeps every event but the commits:** the view is
   opened for the labelled steps, and the whole history is one flag away.
 - **A pull request among the steps:** what is asked of one is whether the
   work has it yet, and its link. The header answers both, from the link row
   Claude Code writes for the session, and a header with no `PR` says there
   is none.
-- **A step each for a round's dispatch, its collect and the skill run before
-  it:** the lines under a label then do not count its rounds, and the steps
-  run half as long again for the same facts (`docs/EVIDENCE.md`).
+- **A step each for a round's dispatch, its collect, the skill run before it
+  and the request:** the lines under a label then do not count its rounds,
+  and the steps run half as long again for the same facts
+  (`docs/EVIDENCE.md`).
 - **Asking envoy's job line of every dispatch, or leaving out a run on a
   branch:** a background dispatch prints no line, and loops dispatch real
-  rounds. A dispatch that did not happen shows as "no collect seen", which
+  rounds. A dispatch that did not happen is a round among the steps, which
   sends the user to look (`docs/EVIDENCE.md`).
 - **Any command that names a skill's file as a read** (`sed -n`, `head`,
   `grep`): each shows a passage, and together they run more often than `cat`
@@ -287,7 +320,7 @@ Nothing persists between invocations except the notes.
 - **A block of history under each label, or a lane per label:** the first
   loses the order across labels, the second has no room for an event's text.
 - **A row drawn faint when no label has an event:** such a session can hold
-  commits, notes, or a round with no collect.
+  commits or notes.
 - **Colours taken from the tmux palette:** they tie the binary to tmux and
   leave a plain shell without them. The terminal's own 16 colours follow the
   theme everywhere.
@@ -298,17 +331,19 @@ Nothing persists between invocations except the notes.
   empty on the header line. The popup parses them from `board --ids --brief`,
   which has no header line. The text may carry escape codes; the ids never
   do.
-- **`show --head` and `show --no-head [--all]`:** the popup's status and its
-  main panel. `show --no-head` opens with what the view may lack, so the
-  main panel stands on its own.
+- **`show --head`, `show --no-head [--all]` and `show [--all]`:** the
+  popup's status, its main panel, and the stacked panel that holds both.
+  `show --no-head` opens with what the view may lack, so the main panel
+  stands on its own.
 - **The environment the popup sets:** `CLICOLOR_FORCE=1` asks for colour
   through a pipe and `COLUMNS` is the width a line may fill; `NO_COLOR` wins
   over both.
-- **Text the popup test waits on:** the head's first line,
-  `<title>   <short id>   <pane>` (the id and the pane start the next line
-  when the title fills the width), a label row in its brief form, the brief
-  list's rows cut to the side column, and the newest step on the main
-  panel's first line.
+- **Text the popup test waits on:** the head's first line as the popup
+  paints it, `<title>   <short id>   <glyph> <pane>` (the id and the pane
+  start the next line when the title fills the width), a label row in its
+  brief form, the brief list's rows cut to the side column, the newest step
+  on the main panel's first line, and on the stacked panel the head's
+  `notes` row and the `history` heading.
 - **The notes file and `import-notes`:**
   `$XDG_STATE_HOME/claude-steps/notes/<id>.jsonl`, one JSON note per line.
   `claude-tomini` sends a moved session's file to `claude-steps import-notes`
