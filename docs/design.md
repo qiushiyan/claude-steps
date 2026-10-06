@@ -146,9 +146,11 @@ Nothing persists between invocations except the notes.
 - **Step:** what happened under a label: a run, a read or a round, with the
   request it answered, or a request nothing answered; and the user's notes.
   A session view lists the steps newest first, with the commits between two
-  as one count line; every other line is in the full history
-  (`show --all`). The view is opened to ask whether a labelled step happened
-  and what was committed since, and the steps are that answer in order.
+  as one count line, under a heading that says the order, since a list read
+  from the top otherwise reads as the order things ran in. Every other line
+  is in the full history (`show --all`). The view is opened to ask whether a
+  labelled step happened and what was committed since, and the steps are
+  that answer in order.
 - **A round is one step.** Under a label that lists rounds, its lines count
   the rounds run. The line is dated at the dispatch, like the label, so the
   commits above it are the ones its reviewer did not read. Every round such
@@ -342,8 +344,8 @@ Nothing persists between invocations except the notes.
   paints it, `<title>   <short id>   <glyph> <pane>` (the id and the pane
   start the next line when the title fills the width), a label row in its
   brief form, the brief list's rows cut to the side column, the newest step
-  on the main panel's first line, and on the stacked panel the head's
-  `notes` row and the `history` heading.
+  on the main panel's first line, the panels' labels, and on the stacked
+  panel the head's `notes` row and the `history · newest first` heading.
 - **The notes file and `import-notes`:**
   `$XDG_STATE_HOME/claude-steps/notes/<id>.jsonl`, one JSON note per line.
   `claude-tomini` sends a moved session's file to `claude-steps import-notes`

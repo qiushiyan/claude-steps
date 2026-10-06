@@ -24,7 +24,7 @@ func TestNote(t *testing.T) {
 	// each was written.
 	contains(t, out,
 		"notes   now              second note\n        20 minutes ago   skip verify, the spike covered it\n",
-		"steps\n  note      now   second note\n  note      20m   skip verify, the spike covered it\n",
+		"steps · newest first\n  note      now   second note\n  note      20m   skip verify, the spike covered it\n",
 	)
 	contains(t, w.ok("board"), "(2) second note")
 

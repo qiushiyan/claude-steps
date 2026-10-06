@@ -21,7 +21,7 @@ docs     ·
 
 notes   1 hour ago   skip the docs pass
 
-steps
+steps · newest first
   verify   15m   skill verify-local  spikes
   note     1h    skip the docs pass
                  1 commit
@@ -81,7 +81,7 @@ A session view reads from the top, newest first:
   the session is under the label.
 - **`notes`:** your latest notes, one line each, cut where the width is
   known. `show --all` lists every one.
-- **`steps`:** what happened under each label, newest first, and your notes
+- **`steps · newest first`:** what happened under each label, and your notes
   at the time you wrote them, each whole. A step is what ran, said with the
   request that asked for it, or a request nothing answered. A round is one
   step, at its dispatch, and takes the skill's runs before it, so the

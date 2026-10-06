@@ -37,7 +37,7 @@ func TestShow(t *testing.T) {
 	// its dispatch with the command that asked for it, and the commits between
 	// as a count.
 	contains(t, out, `
-steps
+steps · newest first
   prompts   12m   read skills/prompt-engineering/SKILL.md
   verify    15m   skill pl-loopy-verify  local spikes
                   1 commit
@@ -47,12 +47,12 @@ steps
 
 11 rows in the full history (show --all)
 `)
-	lacks(t, out, "compaction (manual)", "commit  ", "history\n", "dispatched", "collected", "no collect seen")
+	lacks(t, out, "compaction (manual)", "commit  ", "history · newest first", "dispatched", "collected", "no collect seen")
 
 	// --all prints the whole timeline in the steps' place, and the footer's
 	// count is the rows it holds.
 	all := w.ok("show", "%1", "--all")
-	_, history, found := strings.Cut(all, "\nhistory\n")
+	_, history, found := strings.Cut(all, "\nhistory · newest first\n")
 	if rows := strings.Count(history, "\n"); !found || rows != 11 {
 		t.Errorf("want 11 rows of history, got %d:\n%s", rows, all)
 	}
@@ -65,8 +65,8 @@ steps
 		"            3h    commit  the calendar walks days once (review r1)\n",
 		"  review    3h    /review  codex full review\n",
 	)
-	lacks(t, all, "steps\n", "in the full history")
-	if head, _, _ := strings.Cut(out, "\nsteps\n"); !strings.HasPrefix(all, head) {
+	lacks(t, all, "steps · newest first", "in the full history")
+	if head, _, _ := strings.Cut(out, "\nsteps · newest first\n"); !strings.HasPrefix(all, head) {
 		t.Errorf("--all changes more than the timeline:\n%s", all)
 	}
 
@@ -101,7 +101,7 @@ func TestARoundIsOneStepAtItsDispatch(t *testing.T) {
 	tr.Bash("envoy collect review-r7", fmt.Sprintf(collected, "review-r7", "partial"))
 	tr.Write(t, w.projects, "-work-app", id)
 	contains(t, w.ok("show", id),
-		"\nsteps\n  review   3h   review-r7  envoy said partial\n\n",
+		"\nsteps · newest first\n  review   3h   review-r7  envoy said partial\n\n",
 		"3 hours ago   0 commits since   review-r7 envoy said partial\n",
 	)
 	contains(t, w.ok("show", id, "--all"),
@@ -130,7 +130,7 @@ func TestARoundCarriesTheSkillRunBeforeIt(t *testing.T) {
 	tr.Write(t, w.projects, "p", id)
 	out := w.ok("show", id)
 	contains(t, out, `
-steps
+steps · newest first
   review   3h   review-r0
   verify   3h   skill pl-loopy-verify  spikes
   review   3h   review-r2
@@ -148,7 +148,7 @@ steps
 	// A skill run after the last round is a line of its own.
 	tr.Slash("review", "one more", "/home/u/.claude/skills/review")
 	tr.Write(t, w.projects, "p", id)
-	contains(t, w.ok("show", id), "\nsteps\n  review   3h   /review  one more\n  review   3h   review-r0\n")
+	contains(t, w.ok("show", id), "\nsteps · newest first\n  review   3h   /review  one more\n  review   3h   review-r0\n")
 }
 
 // A request under a label is said on the step that answered it: the first
@@ -175,7 +175,7 @@ func TestARequestIsSaidOnTheStepThatAnsweredIt(t *testing.T) {
 	tr.Write(t, w.projects, "p", id)
 	out := w.ok("show", id)
 	contains(t, out, `
-steps
+steps · newest first
   prompts   3h   pasted app-prompt-check
   verify    3h   skill pl-loopy-verify  again
   verify    3h   you: "have we run pl-loopy-verify yet?"
@@ -255,7 +255,7 @@ func TestANameDispatchedAgainIsOneRound(t *testing.T) {
 	tr.Write(t, w.projects, "p", id)
 	w.panes = []panes.Pane{{ID: "%9", Where: "x:1.1", SessionID: id}}
 	out := w.ok("show", id)
-	contains(t, out, "\nsteps\n  review   3h   review-r5\n  review   3h   review-r4\n\n")
+	contains(t, out, "\nsteps · newest first\n  review   3h   review-r5\n  review   3h   review-r4\n\n")
 	lacks(t, out, "dispatched", "no collect seen")
 	contains(t, w.ok("show", id, "--all"), "review-r4  dispatched  (2 times)\n")
 }
@@ -279,14 +279,14 @@ func TestARunThatReturnedAnError(t *testing.T) {
 	tr.BashError(run, "envoy: unknown voice")
 	tr.Bash(run, "Command running in background")
 	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "ok"))
-	contains(t, show(tr), "\nsteps\n  review   3h   review-r1\n  review   3h   review-r1  run returned an error\n\n")
+	contains(t, show(tr), "\nsteps · newest first\n  review   3h   review-r1\n  review   3h   review-r1  run returned an error\n\n")
 
 	tr = fixture.New()
 	tr.BashError(run, "job: /jobs/app-1/review-r1\nprovider: codex\nstatus: timeout — the turn hit its cap\n")
 	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "timeout"))
 	contains(t, show(tr),
 		"review    3 hours ago   0 commits since   review-r1 run returned an error, envoy said timeout\n",
-		"\nsteps\n  review   3h   review-r1  run returned an error, envoy said timeout\n\n",
+		"\nsteps · newest first\n  review   3h   review-r1  run returned an error, envoy said timeout\n\n",
 	)
 	contains(t, show(tr, "--all"), "  review   3h   review-r1  collected, envoy said timeout\n  review   3h   review-r1  run returned an error\n")
 	w.env = map[string]string{"CLICOLOR_FORCE": "1"}
@@ -298,7 +298,7 @@ func TestARunThatReturnedAnError(t *testing.T) {
 	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "partial"))
 	contains(t, show(tr),
 		"review    3 hours ago   0 commits since   review-r1 envoy said partial\n",
-		"\nsteps\n  review   3h   review-r1  envoy said partial\n  review   3h   review-r1  run returned an error\n\n",
+		"\nsteps · newest first\n  review   3h   review-r1  envoy said partial\n  review   3h   review-r1  run returned an error\n\n",
 	)
 }
 
@@ -324,7 +324,7 @@ jobs = ["review-"]
 	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/p.md", "Command running in background")
 	tr.Bash("envoy collect review-r1", fmt.Sprintf(collected, "review-r1", "ok"))
 	tr.Write(t, w.projects, "p", id)
-	contains(t, w.ok("show", id), "\nsteps\n  review docs   3h   /update-docs newer → review-r1\n\n")
+	contains(t, w.ok("show", id), "\nsteps · newest first\n  review docs   3h   /update-docs newer → review-r1\n\n")
 
 	// A request under one label is the round's, and the model's own run
 	// under the other lends it no words.
@@ -332,7 +332,7 @@ jobs = ["review-"]
 	tr.SkillCall("update-docs", "newer", "p", false)
 	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/p.md", "Command running in background")
 	tr.Write(t, w.projects, "p", id)
-	contains(t, w.ok("show", id), "\nsteps\n  review docs   3h   /review older → review-r1\n\n")
+	contains(t, w.ok("show", id), "\nsteps · newest first\n  review docs   3h   /review older → review-r1\n\n")
 }
 
 // Obligation 17: --json carries timestamps and nothing relative.
@@ -456,7 +456,7 @@ func TestRepeatedLinesAreOneLine(t *testing.T) {
 	tr.Slash("review", reviewVerify, "/home/u/.claude/skills/review")
 	tr.Write(t, w.projects, "p", id)
 	out = w.ok("show", id)
-	contains(t, out, "\nsteps\n  review   3h   pasted app-review-verify → /review  full review. While you wait",
+	contains(t, out, "\nsteps · newest first\n  review   3h   pasted app-review-verify → /review  full review. While you wait",
 		"\n  verify   3h   pasted app-review-verify\n\n")
 	lacks(t, out, "times)", "review verify")
 }
@@ -503,7 +503,7 @@ func TestStepsCountTheCommitsAroundThem(t *testing.T) {
 	tr.Bash(`git commit -m "three"`, "")
 	tr.Write(t, w.projects, "p", id)
 	contains(t, w.ok("show", id), `
-steps
+steps · newest first
                 2 commits
   verify   3h   skill pl-loopy-verify
                 1 commit
@@ -516,10 +516,10 @@ steps
 	tr.Slash("unlabelled", "", "/home/u/.claude/skills/unlabelled")
 	tr.Bash(`git commit -m "two"`, "")
 	tr.Write(t, w.projects, "p", id)
-	contains(t, w.ok("show", id), "\nsteps\n  2 commits\n\n3 rows in the full history (show --all)\n")
+	contains(t, w.ok("show", id), "\nsteps · newest first\n  2 commits\n\n3 rows in the full history (show --all)\n")
 
 	fixture.New().Slash("unlabelled", "", "/home/u/.claude/skills/unlabelled").Write(t, w.projects, "p", id)
-	contains(t, w.ok("show", id), "\nsteps\n  none\n\n1 row in the full history (show --all)\n")
+	contains(t, w.ok("show", id), "\nsteps · newest first\n  none\n\n1 row in the full history (show --all)\n")
 }
 
 // Labels are not exclusive. A step under two is one row with both names,
@@ -547,7 +547,7 @@ color = "yellow"
 	tr.Write(t, w.projects, "p", id)
 	out := w.ok("show", id)
 	contains(t, out, `
-steps
+steps · newest first
   review docs   3h   skill review  failed to load
   review docs   3h   you: "next, the review skill and then update-docs"
                      1 commit
@@ -569,7 +569,7 @@ steps
 	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
 	tr.Write(t, w.projects, "p", id)
 	out = w.ok("show", id)
-	contains(t, out, "\nsteps\n  review   3h   review-r1\n  docs     3h   read skills/review/SKILL.md\n\n",
+	contains(t, out, "\nsteps · newest first\n  review   3h   review-r1\n  docs     3h   read skills/review/SKILL.md\n\n",
 		"docs     3 hours ago                     read skills/review/SKILL.md\n")
 }
 
@@ -579,8 +579,8 @@ func TestNoLabelsShowTheHistory(t *testing.T) {
 	w := newWorld(t)
 	fixture.WriteFile(t, filepath.Join(w.home, ".config", "claude-steps", "config.toml"), nil)
 	out := w.ok("show", "%1")
-	contains(t, out, "\nhistory\n", "commit  docs: the stories on the local rig")
-	lacks(t, out, "steps\n", "in the full history")
+	contains(t, out, "\nhistory · newest first\n", "commit  docs: the stories on the local rig")
+	lacks(t, out, "steps · newest first", "in the full history")
 	if got := columns.Split(strings.SplitN(w.ok("board"), "\n", 2)[0], -1); !slices.Equal(got, []string{"pane", "session", "PR", "note"}) {
 		t.Errorf("header: %q", got)
 	}
@@ -626,7 +626,7 @@ func TestTheSessionViewFitsTheWidth(t *testing.T) {
 func TestTheHeadAndTheTimelineApart(t *testing.T) {
 	w := newWorld(t)
 	w.ok("note", "%1", "a note")
-	for heading, flags := range map[string][]string{"steps": nil, "history": {"--all"}} {
+	for heading, flags := range map[string][]string{"steps · newest first": nil, "history · newest first": {"--all"}} {
 		show := func(more ...string) string { return w.ok(slices.Concat([]string{"show", "%1"}, flags, more)...) }
 		if whole, head, timeline := show(), show("--head"), show("--no-head"); whole != head+"\n"+heading+"\n"+timeline {
 			t.Errorf("%v: the view is not its head and its timeline:\n%s\n--- head\n%s\n--- timeline\n%s", flags, whole, head, timeline)

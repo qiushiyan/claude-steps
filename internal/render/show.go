@@ -143,9 +143,11 @@ func (v View) Timeline(w io.Writer, s Session, history bool) {
 // outlive it, and nothing else.
 func (v View) body(w io.Writer, rec record.Record, history, heading bool) {
 	all := v.lines(rec)
+	// The heading says the order: a list read from the top otherwise reads as
+	// the order things ran in.
 	head := func(name string) {
 		if heading {
-			fmt.Fprintln(w, v.paint(of(faint, name)))
+			fmt.Fprintln(w, v.paint(of(faint, name+" · newest first")))
 		}
 	}
 	switch {
