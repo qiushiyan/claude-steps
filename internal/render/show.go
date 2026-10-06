@@ -27,7 +27,8 @@ func (v View) Show(w io.Writer, s Session, history bool) {
 // directory and pull requests, anything the reader could not read, each
 // label's latest event, the rounds with no collect seen and the notes. With
 // all, every note. A popup shows it beside the timeline, so it fits a narrow
-// width too: an item that does not fit a line starts the next, and below
+// width whole: an item that does not fit a line starts the next, one wider
+// than the width is folded, a row's text is cut to the room it has, and below
 // shortBelow columns a row gives its time as a cell does.
 func (v View) Head(w io.Writer, s Session, all bool) {
 	rec := s.Record
@@ -67,9 +68,7 @@ func (v View) Head(w io.Writer, s Session, all bool) {
 	if !ok {
 		lack = join(unread(rec), v.path(rec.Path))
 	}
-	if lack != "" {
-		fmt.Fprintln(w, v.paint(of(problem, lack)))
-	}
+	v.warn(w, lack)
 	rule := ruleWidth
 	if v.Width > 0 {
 		rule = v.Width
@@ -84,23 +83,35 @@ func (v View) Head(w io.Writer, s Session, all bool) {
 			for _, l := range states {
 				rows = append(rows, v.labelRow(l, brief))
 			}
-			v.table(w, "", rows, labelWidth)
+			v.table(w, "", rows, labelWidth, 1)
 			fmt.Fprintln(w)
 		}
 		summary = v.uncollected(rec, brief)
 	}
-	v.table(w, "", v.wrapNotes(append(summary, v.notes(rec, all, brief)...)), textWidth)
+	v.table(w, "", append(summary, v.notes(rec, all, brief)...), textWidth, 1)
+}
+
+// warn says what the view may lack, folded to the width: it is never cut.
+func (v View) warn(w io.Writer, lack string) {
+	if lack == "" {
+		return
+	}
+	for _, l := range v.fold(of(problem, lack)) {
+		fmt.Fprintln(w, v.paint(l))
+	}
 }
 
 // Timeline prints a session's steps, or with history its whole timeline,
 // with no head above them and no heading: a popup shows the head beside it
-// and names the timeline on its border. A transcript that cannot be read
-// says so in the timeline's place.
+// and names the timeline on its border. What the view may lack is said
+// first all the same, so the timeline stands on its own; a transcript that
+// cannot be read says so in the timeline's place.
 func (v View) Timeline(w io.Writer, s Session, history bool) {
 	if !readable(s.Record) {
 		fmt.Fprintln(w, v.paint(of(problem, unread(s.Record))))
 		return
 	}
+	v.warn(w, v.caveat(s.Record))
 	v.body(w, s.Record, history, false)
 }
 
@@ -156,17 +167,33 @@ func (v View) split(head, tail string) []cell {
 }
 
 // fill packs the head's items into lines no wider than the view. An item
-// moves to the next line whole.
+// moves to the next line whole, and one folded across lines shares none.
 func (v View) fill(items []cell) []cell {
 	var lines []cell
+	open := false // the last line can take another item
 	for _, it := range items {
-		if n := len(lines); n > 0 && lines[n-1].width()+viewGap+it.width() <= v.room() {
+		parts := v.fold(it)
+		if n := len(lines); open && len(parts) == 1 && lines[n-1].width()+viewGap+it.width() <= v.room() {
 			lines[n-1] = lines[n-1].add(plain, strings.Repeat(" ", viewGap)).join(it)
 			continue
 		}
-		lines = append(lines, it)
+		lines = append(lines, parts...)
+		open = len(parts) == 1
 	}
 	return lines
+}
+
+// fold breaks an item wider than the view into lines that fit, at its spaces
+// where it has them, so a link, a path or a warning is never cut.
+func (v View) fold(c cell) []cell {
+	if c.width() <= v.room() || len(c.spans) != 1 {
+		return []cell{c}
+	}
+	var out []cell
+	for _, part := range wrap(c.spans[0].text, v.Width) {
+		out = append(out, of(c.spans[0].style, part))
+	}
+	return out
 }
 
 // when is a time in a head's row: in words, or as a cell gives it when the
@@ -221,23 +248,29 @@ func (v View) uncollected(rec record.Record, brief bool) []trow {
 	var rows []trow
 	for i, e := range slices.Backward(out) {
 		if len(out)-i > shown {
-			rows = append(rows, trow{lead: []cell{{}, of(faint, fmt.Sprintf("%d more", i+1))}})
+			rows = append(rows, trow{lead: []cell{{}, more(fmt.Sprintf("%d more", i+1))}})
 			break
 		}
-		rows = append(rows, trow{lead: []cell{head, of(plain, e.Name), of(plain, v.when(e.At, brief))}})
+		rows = append(rows, trow{lead: []cell{head, of(plain, v.when(e.At, brief))}, text: e.Name})
 		head = cell{}
 	}
 	return rows
 }
 
+// more says how many rows a list left out. It runs over the columns after
+// it, so the time column keeps the width of a time.
+func more(text string) cell {
+	return cell{spans: []span{{text, faint}}, wide: true}
+}
+
 // notes are the user's notes as rows of a session's head, newest first: the
-// latest few, or with all every one. A note is never cut: it is their words,
-// and wrapNotes folds one that is wider than the view.
+// latest few, or with all every one. A note is one line here, cut to the
+// room it has; the steps keep its every word.
 func (v View) notes(rec record.Record, all, brief bool) []trow {
 	head := of(faint, "notes")
 	var rows []trow
-	add := func(cells ...cell) {
-		rows = append(rows, trow{lead: append([]cell{head}, cells...)})
+	add := func(text string, cells ...cell) {
+		rows = append(rows, trow{lead: append([]cell{head}, cells...), text: text})
 		head = cell{}
 	}
 	keep := len(rec.Notes)
@@ -246,50 +279,19 @@ func (v View) notes(rec record.Record, all, brief bool) []trow {
 	}
 	for i, n := range slices.Backward(rec.Notes) {
 		if len(rec.Notes)-i > keep {
-			add(of(faint, fmt.Sprintf("%d earlier", i+1)))
+			add("", more(fmt.Sprintf("%d earlier", i+1)))
 			break
 		}
-		add(of(plain, v.when(n.At, brief)), cell{spans: []span{{oneLine(n.Text), plain}}, note: true})
+		add(oneLine(n.Text), of(plain, v.when(n.At, brief)))
 	}
 	if rec.UnreadNotes > 0 {
-		add(cell{spans: []span{{plural(rec.UnreadNotes, "note line") + " could not be read", problem}}, wide: true})
+		add("", cell{spans: []span{{plural(rec.UnreadNotes, "note line") + " could not be read", problem}}, wide: true})
 	}
 	if rec.NotesError != "" {
-		add(cell{spans: []span{{rec.NotesError, problem}}, wide: true})
+		add("", cell{spans: []span{{rec.NotesError, problem}}, wide: true})
 	}
 	if len(rows) == 0 {
-		add(of(faint, "none"))
+		add("", of(faint, "none"))
 	}
 	return rows
-}
-
-// wrapNotes folds a note wider than the room its column leaves onto the rows
-// under it, at its spaces, so the head fits its width and the note keeps
-// every word.
-func (v View) wrapNotes(rows []trow) []trow {
-	if v.Width <= 0 {
-		return rows
-	}
-	leads := make([][]cell, len(rows))
-	for i, r := range rows {
-		leads[i] = r.lead
-	}
-	var out []trow
-	for _, r := range rows {
-		last := len(r.lead) - 1
-		if last < 0 || !r.lead[last].note {
-			out = append(out, r)
-			continue
-		}
-		room := max(v.Width-starts(leads, viewGap)[last], textFloor)
-		for i, part := range wrap(r.lead[last].spans[0].text, room) {
-			lead := slices.Clone(r.lead)
-			if i > 0 {
-				lead = make([]cell, last+1)
-			}
-			lead[last] = of(plain, part)
-			out = append(out, trow{lead: lead})
-		}
-	}
-	return out
 }

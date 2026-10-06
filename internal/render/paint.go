@@ -53,12 +53,10 @@ type span struct {
 }
 
 // cell is what one column holds in a row. A wide cell does not widen its
-// column: it runs over the columns after it, which its row leaves empty. A
-// note's cell is folded onto the rows under it rather than cut.
+// column: it runs over the columns after it, which its row leaves empty.
 type cell struct {
 	spans []span
 	wide  bool
-	note  bool
 }
 
 func of(st style, text string) cell {
@@ -183,17 +181,20 @@ func (v View) lay(rows [][]cell, gap int) []string {
 }
 
 // trow is a row that ends in free text, which is cut to the room the cells
-// before it leave.
+// before it leave, or with fold set folded onto the rows under it.
 type trow struct {
 	lead  []cell
 	text  string
 	style style
+	fold  bool
 }
 
-// table prints rows in columns behind an indent. A row's text is cut to the
-// room left in the view's width, or to most columns when the width is not
-// known.
-func (v View) table(w io.Writer, indent string, rows []trow, most int) {
+// table prints rows in columns behind an indent. A row's text takes the room
+// left in the view's width, or most columns when the width is not known, and
+// is cut to it or folded onto the rows under it. floor is the least room the
+// text is given: a row runs past the width by what the floor adds, so a floor
+// of one column keeps every row inside it.
+func (v View) table(w io.Writer, indent string, rows []trow, most, floor int) {
 	leads, cols := make([][]cell, len(rows)), 0
 	for i, r := range rows {
 		leads[i] = r.lead
@@ -201,15 +202,23 @@ func (v View) table(w io.Writer, indent string, rows []trow, most int) {
 	}
 	room := most
 	if v.Width > 0 {
-		room = max(v.Width-width(indent)-starts(leads, viewGap)[cols], textFloor)
+		room = max(v.Width-width(indent)-starts(leads, viewGap)[cols], floor)
 	}
-	for i, r := range rows {
-		for len(leads[i]) < cols {
-			leads[i] = append(leads[i], cell{})
+	var lines [][]cell
+	for _, r := range rows {
+		parts := []string{cut(r.text, room)}
+		if r.fold && r.text != "" {
+			parts = wrap(r.text, room)
 		}
-		leads[i] = append(leads[i], of(r.style, cut(r.text, room)))
+		for i, part := range parts {
+			lead := make([]cell, cols)
+			if i == 0 {
+				copy(lead, r.lead)
+			}
+			lines = append(lines, append(lead, of(r.style, part)))
+		}
 	}
-	for _, line := range v.lay(leads, viewGap) {
+	for _, line := range v.lay(lines, viewGap) {
 		fmt.Fprintln(w, indent+line)
 	}
 }

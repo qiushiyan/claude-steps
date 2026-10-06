@@ -291,7 +291,8 @@ func (v View) timeline(w io.Writer, lines []line) {
 		if l.kind == record.Note {
 			tags = of(faint, "note")
 		}
-		row := trow{lead: []cell{tags, of(plain, v.brief(l.at))}, text: l.text, style: l.style}
+		// A note is folded rather than cut: it is the user's words.
+		row := trow{lead: []cell{tags, of(plain, v.brief(l.at))}, text: l.text, style: l.style, fold: l.kind == record.Note}
 		if l.times > 1 {
 			row.text += fmt.Sprintf("  (%d times)", l.times)
 		}
@@ -300,5 +301,5 @@ func (v View) timeline(w io.Writer, lines []line) {
 		}
 		rows = append(rows, row)
 	}
-	v.table(w, "  ", rows, textWidth)
+	v.table(w, "  ", rows, textWidth, textFloor)
 }

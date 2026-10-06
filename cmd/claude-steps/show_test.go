@@ -159,7 +159,7 @@ func TestANameDispatchedAgainIsOneRound(t *testing.T) {
 	w.panes = []panes.Pane{{ID: "%9", Where: "x:1.1", SessionID: id}}
 	out := w.ok("show", id)
 	contains(t, out,
-		"no collect seen   review-r5   3 hours ago\nnotes",
+		"no collect seen   3 hours ago   review-r5\nnotes",
 		"\nsteps\n  review   3h   review-r5  dispatched 2 times, no collect seen\n  review   3h   review-r4  dispatched 2 times\n\n",
 	)
 	contains(t, w.ok("show", id, "--all"), "review-r4  dispatched  (2 times)\n")
@@ -365,7 +365,7 @@ func TestRoundsWithNoCollectSeen(t *testing.T) {
 	out := w.ok("show", id)
 	contains(t, out,
 		"review    2 hours ago   0 commits since   review-r2 collected 2 hours ago\n",
-		"no collect seen   spike-r1    3 hours ago\n                  review-r1   3 hours ago\nnotes",
+		"no collect seen   3 hours ago   spike-r1\n                  3 hours ago   review-r1\nnotes",
 		// A run that returned an error is not waiting for a collect.
 		"  review   2h   review-r3  run returned an error\n  review   2h   review-r2\n  review   3h   review-r1  no collect seen\n",
 	)
@@ -381,7 +381,7 @@ func TestRoundsWithNoCollectSeen(t *testing.T) {
 		many.Bash("envoy run job-"+name+" --with codex --prompt-file /tmp/p.md", "Command running in background")
 	}
 	many.Write(t, w.projects, "p", id)
-	contains(t, w.ok("show", id), "no collect seen   job-e    3 hours ago\n                  job-d    3 hours ago\n                  job-c    3 hours ago\n                  2 more\n")
+	contains(t, w.ok("show", id), "no collect seen   3 hours ago   job-e\n                  3 hours ago   job-d\n                  3 hours ago   job-c\n                  2 more\n")
 }
 
 // The commits around the steps are counted wherever they fall: after the
@@ -516,6 +516,15 @@ func TestTheHeadAndTheTimelineApart(t *testing.T) {
 	}
 	contains(t, w.ok("show", "%1", "--no-head"), "  note      now   a note\n", "\n12 rows in the full history (show --all)\n")
 
+	// The head lists the latest notes, and with --all every one.
+	for _, text := range []string{"second", "third", "fourth"} {
+		w.ok("note", "%1", text)
+	}
+	contains(t, w.ok("show", "%1", "--head"), "notes             now   fourth\n                  now   third\n                  now   second\n                  1 earlier\n")
+	all := w.ok("show", "%1", "--head", "--all")
+	contains(t, all, "now   a note\n")
+	lacks(t, all, "earlier")
+
 	// A transcript that cannot be read says so in the timeline's place, and
 	// the head is the whole view.
 	if timeline := w.ok("show", "%3", "--no-head"); timeline != "no transcript\n" {
@@ -533,9 +542,8 @@ func TestTheHeadAndTheTimelineApart(t *testing.T) {
 }
 
 // Beside the timeline the head is narrow: a row gives its time as a cell
-// does, the title and an event's text are cut, an item that does not fit a
-// line starts the next, and a note is folded onto the rows under it with
-// every word kept. No row runs past the width.
+// does, the title, an event's text and a note are cut, and an item that does
+// not fit a line starts the next. No row runs past the width.
 func TestANarrowHead(t *testing.T) {
 	w := newWorld(t)
 	w.ok("note", "%1", "the spike covered the verify pass, so skip it until the importer lands on the new schema")
@@ -552,27 +560,74 @@ func TestANarrowHead(t *testing.T) {
 		"review    2h    +1   review-r2 collected 2h ago…\n"+
 			"verify    15m   +0   skill pl-loopy-verify loca…\n"+
 			"prompts   12m        read skills/prompt-enginee…\n",
-		"notes             now   the spike covered the\n"+
-			"                        verify pass, so skip it\n"+
-			"                        until the importer lands\n"+
-			"                        on the new schema\n",
+		"notes             now   the spike covered the v…\n",
 	)
 	lacks(t, out, " ago   ", "commit since", "steps")
 
-	// A title wider than the head is cut, and a word wider than a note's
-	// room is broken across rows rather than lost. A note is folded no
-	// narrower than an event's text is cut.
+	// A title wider than the head is cut. In the steps a word wider than a
+	// note's room is broken across rows rather than lost.
 	id := fixture.ID("4e4e4e4e")
 	fixture.New().Title("A title far longer than the narrow head beside the steps").Prompt("start").Write(t, w.projects, "p", id)
 	w.ok("note", id, "see https://github.com/acme/app/pull/7145#discussion_r1")
 	w.env = map[string]string{"COLUMNS": "40"}
-	contains(t, w.ok("show", id, "--head"),
-		"A title far longer than the narrow head…\n4e4e4e4e\n",
-		"notes             now   see\n"+
-			"                        https://github.com/acme/\n"+
-			"                        app/pull/7145#discussion\n"+
-			"                        _r1\n",
+	contains(t, w.ok("show", id, "--head"), "A title far longer than the narrow head…\n4e4e4e4e\n", "notes             now   see https://git…\n")
+	contains(t, w.ok("show", id, "--no-head"),
+		"  note   now   see\n"+
+			"               https://github.com/acme/a\n"+
+			"               pp/pull/7145#discussion_r\n"+
+			"               1\n")
+}
+
+// The popup's side column can be as narrow as 44 columns, and the head fits
+// it whole: no row runs past the width, a link or a warning wider than the
+// width is folded rather than cut, the path and the branch take a line each
+// when they do not fit one, a row gives its time as a cell does, and a note
+// is one line, cut, since the steps beside it keep its every word.
+func TestTheHeadFitsTheSideColumn(t *testing.T) {
+	const url = "https://github.com/acme/an-application-with-a-long-name/pull/1234"
+	w := newWorld(t)
+	id := fixture.ID("5a5a5a5a")
+	tr := fixture.New().Title("Fits the side")
+	tr.Prompt("start")
+	tr.Bash("envoy run spike-review-r1 --with codex --prompt-file /tmp/s.md", "Command running in background")
+	tr.Bash(`sh -c "git commit -m x"`, "[main 1a2b3c4] x") // a commit the reader may have missed
+	tr.Raw(fixture.Row{"type": "pr-link", "prNumber": 1234, "prUrl": url, "prRepository": "acme/an-application-with-a-long-name"})
+	for _, row := range tr.Rows {
+		if _, ok := row["cwd"]; ok {
+			row["cwd"], row["gitBranch"] = "/work/a-checkout-with-a-long-name", "feat/a-branch-name"
+		}
+	}
+	tr.Write(t, w.projects, "p", id)
+	note := "the spike covered the verify pass, so skip it until the importer lands on the new schema"
+	fixture.WriteFile(t, filepath.Join(w.state, "notes", id+".jsonl"),
+		[]byte(fmt.Sprintf(`{"at":%q,"text":%q}`+"\n", w.now.Add(-2*time.Hour).Format(time.RFC3339), note)))
+
+	w.env = map[string]string{"COLUMNS": "44"}
+	head := w.ok("show", id, "--head")
+	for _, row := range strings.Split(head, "\n") {
+		if screen.StringWidth(row) > 44 {
+			t.Errorf("a row takes %d columns:\n%s", screen.StringWidth(row), row)
+		}
+	}
+	contains(t, head,
+		"/work/a-checkout-with-a-long-name\nfeat/a-branch-name\nlast message 3 hours ago\n",
+		"PR #1234 linked\n"+url[:44]+"\n"+url[44:]+"\n",
+		"the reader may have missed 1 × commit\n(claude-steps check)\n",
+		"no collect seen   3h   spike-review-r1\n"+
+			"notes             2h   the spike covered th…\n",
 	)
+
+	// The steps stand on their own: what the view may lack comes first, and
+	// the note keeps its every word, folded under its text.
+	timeline := w.ok("show", id, "--no-head")
+	if !strings.HasPrefix(timeline, "the reader may have missed 1 × commit\n(claude-steps check)\n") {
+		t.Errorf("the steps do not open with what the view may lack:\n%s", timeline)
+	}
+	contains(t, timeline,
+		"  note   2h   the spike covered the verify\n"+
+			"              pass, so skip it until the\n"+
+			"              importer lands on the new\n"+
+			"              schema\n")
 }
 
 // A dispatch that failed says so, and a fact with no time says that rather

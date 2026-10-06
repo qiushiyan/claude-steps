@@ -234,6 +234,7 @@ func TestColourIsTheSameTextPainted(t *testing.T) {
 		"  \x1b[2mnote\x1b[0m      now   a note",
 	)
 	contains(t, w.ok("show", "%5"), "\x1b[31m1 line could not be read\x1b[0m")
+	contains(t, w.ok("board", "--brief"), "\x1b[31mno transcript\x1b[0m  session cccccccc", "\x1b[31m!\x1b[0m app")
 
 	// NO_COLOR wins over being asked, and a terminal is painted unasked.
 	w.env = map[string]string{"CLICOLOR_FORCE": "1", "NO_COLOR": "1"}

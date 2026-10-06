@@ -13,9 +13,12 @@ import (
 func TestHelpNeedsNoConfiguration(t *testing.T) {
 	w := newWorld(t)
 	fixture.WriteFile(t, filepath.Join(w.home, ".config", "claude-steps", "config.toml"), []byte("[[label]]\nskils = 1\n"))
-	if out, errb, code := w.run("show", "--help"); code != 0 || !strings.Contains(out, "claude-steps show") {
+	out, errb, code := w.run("show", "--help")
+	if code != 0 || !strings.Contains(out, "claude-steps show") {
 		t.Errorf("show --help with a broken configuration: exit %d, %q, %q", code, out, errb)
 	}
+	// The usage names every option the popup relies on.
+	contains(t, out, "--head", "--no-head", "--brief", "--ids", "--all")
 	if _, errb, code := w.run("show", "%1"); code == 0 || !strings.Contains(errb, "skils") {
 		t.Errorf("a broken configuration was not reported: exit %d, %q", code, errb)
 	}

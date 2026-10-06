@@ -43,7 +43,7 @@ const (
 	noteWidth  = 48 // a note on the board when the width is not known
 	labelWidth = 70 // a label's latest event when the width is not known
 	textWidth  = 96 // an event's text when the width is not known
-	textFloor  = 24 // the least room an event's text is cut to
+	textFloor  = 24 // the least room the timeline gives an event's text; the popup wraps what runs past
 	ruleWidth  = 72 // the rule under the header when the width is not known
 	shortBelow = 80 // a head narrower than this gives a row's time as a cell does: "8m", "+1"
 	shown      = 3  // the notes and the uncollected rounds a session view lists
