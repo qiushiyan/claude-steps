@@ -54,10 +54,11 @@ type rounds struct {
 	sig     *Signal        // the round fact's two counts
 	latest  map[string]int // job name → the round a collect by that name reads
 	awaited map[int]bool   // rounds a collect call has named and has not returned for
+	prompt  *int           // the human prompts read so far
 }
 
-func newRounds(rec *Record, sig *Signal) rounds {
-	return rounds{rec: rec, sig: sig, latest: map[string]int{}, awaited: map[int]bool{}}
+func newRounds(rec *Record, sig *Signal, prompt *int) rounds {
+	return rounds{rec: rec, sig: sig, prompt: prompt, latest: map[string]int{}, awaited: map[int]bool{}}
 }
 
 // command records one simple command of a Bash call when it is an envoy run
@@ -102,7 +103,7 @@ func (r *rounds) command(call *roundCall, at time.Time, argv []string) {
 // The new round stands for the dispatches the earlier one stood for.
 func (r *rounds) dispatch(at time.Time, job string) roundOp {
 	op := roundOp{job: job, run: true, replaced: -1, before: -1}
-	e := Event{At: at, Kind: Round, Name: job, Dispatched: true}
+	e := Event{At: at, Kind: Round, Name: job, Dispatched: true, Prompt: *r.prompt}
 	if prev, ok := r.latest[job]; ok {
 		op.before = prev
 		if p := &r.rec.Events[prev]; p.Waiting() && !r.awaited[prev] {
@@ -212,7 +213,7 @@ func (r *rounds) ran(op roundOp, failed bool, status string, printed bool) {
 // at the collect call.
 func (r *rounds) collected(job string, round int, called, returned time.Time, status string, failed bool) {
 	if round < 0 {
-		r.rec.Events = append(r.rec.Events, Event{At: called, Kind: Round, Name: job})
+		r.rec.Events = append(r.rec.Events, Event{At: called, Kind: Round, Name: job, Prompt: *r.prompt})
 		round = len(r.rec.Events) - 1
 		if _, ok := r.latest[job]; !ok {
 			r.latest[job] = round

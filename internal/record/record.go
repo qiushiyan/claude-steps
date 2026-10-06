@@ -40,6 +40,10 @@ const (
 type Event struct {
 	At   time.Time `json:"at"`
 	Kind Kind      `json:"kind"`
+	// Prompt counts the human prompts up to the one the event came under:
+	// the prompt's own events, and what the session did until the next one,
+	// task notifications and all. 0 is before the first.
+	Prompt int `json:"prompt,omitempty"`
 
 	// Name is the skill as it was invoked or read, the snippet's key, or the
 	// envoy job's name.

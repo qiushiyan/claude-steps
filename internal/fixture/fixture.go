@@ -70,6 +70,14 @@ func (t *Transcript) Prompt(text string) *Transcript {
 	return t
 }
 
+// Notification is a background task's notice, which starts a turn of the
+// model's with no prompt from the user.
+func (t *Transcript) Notification(text string) *Transcript {
+	t.row("user", Row{"promptId": t.id("prompt"), "origin": Row{"kind": "task-notification"}, "promptSource": "system",
+		"message": Row{"role": "user", "content": "<task-notification>" + text + "</task-notification>"}})
+	return t
+}
+
 // Unsourced is a plain text row with no origin, as an older Claude Code
 // wrote a prompt.
 func (t *Transcript) Unsourced(text string) *Transcript {

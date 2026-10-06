@@ -153,6 +153,7 @@ type decoder struct {
 	created    map[string]time.Time // URLs `gh pr create` returned → the call
 	slash      *slashCommand        // a slash command waiting for its expansion
 	sawOrigin  bool
+	prompts    int      // the human prompts read so far
 	unsourced  []prompt // prompts with no origin, used when no row carries one
 
 	sig struct{ slash, tool, pr, compaction, human, commit, round Signal }
@@ -174,7 +175,7 @@ func newDecoder(rec *Record, snippets config.Snippets, mentions []mention) *deco
 		prs:        map[string]int{},
 		created:    map[string]time.Time{},
 	}
-	d.rounds = newRounds(rec, &d.sig.round)
+	d.rounds = newRounds(rec, &d.sig.round, &d.prompts)
 	return d
 }
 
@@ -207,6 +208,7 @@ func (d *decoder) read(r io.Reader) error {
 }
 
 func (d *decoder) add(e Event) int {
+	e.Prompt = d.prompts
 	d.rec.Events = append(d.rec.Events, e)
 	return len(d.rec.Events) - 1
 }
@@ -427,6 +429,9 @@ func (d *decoder) user(at time.Time, r row, text string, blocks []block) {
 		}
 	default:
 		human := r.Origin != nil && r.Origin.Kind == "human"
+		if human {
+			d.prompts++
+		}
 		typed := r.PromptSource == "typed" || r.PromptSource == "queued"
 		if typed {
 			d.sig.human.Second++

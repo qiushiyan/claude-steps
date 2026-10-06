@@ -611,6 +611,30 @@ func TestAPasteDatesItsLabelUntilALoadFollows(t *testing.T) {
 	}
 }
 
+// Each event knows the human prompt it came under, counted from one: the
+// prompt's own events, and what the session did until the next one. A task
+// notification starts no prompt, and a slash command the user typed is one.
+func TestEventsKnowThePromptTheyCameUnder(t *testing.T) {
+	tr := fixture.New()
+	tr.SkillCall("review", "before any prompt", "p0", false)
+	tr.Prompt("/review " + reviewVerify)
+	tr.SkillCall("review", "codex", "p1", false)
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.Notification("review-r1 finished")
+	tr.SkillCall("pl-loopy-verify", "spikes", "p1", false)
+	tr.Slash("review", "again", "/home/u/.claude/skills/review")
+	tr.Read("/home/u/.claude/skills/pl-loopy-verify/SKILL.md", false)
+	var got []string
+	for _, e := range load(t, tr).Events {
+		got = append(got, fmt.Sprintf("%s %s %d", e.Kind, e.Name, e.Prompt))
+	}
+	expected := []string{"skill review 0", "snippet app-review-verify 1", "skill review 1", "round review-r1 1",
+		"skill pl-loopy-verify 1", "skill review 2", "read pl-loopy-verify 2"}
+	if !reflect.DeepEqual(got, expected) {
+		t.Errorf("got  %q\nwant %q", got, expected)
+	}
+}
+
 func TestMentionOnlyLabelHasNoCommitCount(t *testing.T) {
 	tr := fixture.New()
 	tr.Prompt("have we run pl-loopy-verify yet?")
