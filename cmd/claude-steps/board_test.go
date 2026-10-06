@@ -202,7 +202,7 @@ func TestColourIsTheSameTextPainted(t *testing.T) {
 	w := newWorld(t)
 	w.ok("note", "%1", "a note")
 	force := map[string]string{"CLICOLOR_FORCE": "1"}
-	for _, args := range [][]string{{"board"}, {"board", "--ids"}, {"show", "%1"}, {"show", "%1", "--all"}, {"show", "%3"}, {"show", "%4"}, {"show", "%5"}} {
+	for _, args := range [][]string{{"board"}, {"board", "--ids"}, {"board", "--brief"}, {"show", "%1"}, {"show", "%1", "--all"}, {"show", "%1", "--head"}, {"show", "%1", "--no-head"}, {"show", "%3"}, {"show", "%4"}, {"show", "%5"}} {
 		w.env = nil
 		bare := w.ok(args...)
 		w.env = force
@@ -214,7 +214,7 @@ func TestColourIsTheSameTextPainted(t *testing.T) {
 			t.Errorf("%v: the painted text differs from the plain:\n%s\n%s", args, got, bare)
 		}
 	}
-	for _, row := range strings.Split(strings.TrimRight(w.ok("board", "--ids"), "\n"), "\n") {
+	for _, row := range strings.Split(strings.TrimRight(w.ok("board", "--ids")+w.ok("board", "--ids", "--brief"), "\n"), "\n") {
 		if fields := strings.SplitN(row, "\t", 3); len(fields) != 3 || strings.Contains(fields[0]+fields[1], "\x1b") {
 			t.Errorf("an id field is not bare: %q", row)
 		}
@@ -293,4 +293,39 @@ func TestTheBoardFitsTheWidth(t *testing.T) {
 	lacks(t, out[0], "note")
 	lacks(t, out[1], "a long note")
 	contains(t, out[1], "The calenda…  ")
+}
+
+// Beside a session's view the list is brief: each session's pane, when its
+// transcript last had a message, and its title, with no header line. What
+// could not be read comes before the title, so the title is what gives way
+// to the width.
+func TestTheBriefBoard(t *testing.T) {
+	w := newWorld(t)
+	want := "work:1.1  11m  The calendar walks days once\n" +
+		"work:1.2  3h   app\n" +
+		"work:2.1  ·    no transcript  session cccccccc\n" +
+		"work:2.2  ·    transcript unreadable  session dddddddd\n" +
+		"work:3.1  3h   ! app\n"
+	if out := w.ok("board", "--brief"); out != want {
+		t.Errorf("board --brief:\n%s\nwant:\n%s", out, want)
+	}
+	w.env = map[string]string{"COLUMNS": "32"}
+	rows := strings.Split(strings.TrimRight(w.ok("board", "--brief", "--ids"), "\n"), "\n")
+	if len(rows) != 5 {
+		t.Fatalf("want a row for each of five panes and no header:\n%s", strings.Join(rows, "\n"))
+	}
+	for i, row := range rows {
+		fields := strings.Split(row, "\t")
+		if len(fields) != 3 || fields[1] != w.panes[i].SessionID || fields[0] != w.panes[i].ID {
+			t.Errorf("row %d does not start with its pane and session ids: %q", i, row)
+		}
+		if n := screen.StringWidth(fields[2]); n > 32 {
+			t.Errorf("row %d takes %d columns: %q", i, n, fields[2])
+		}
+	}
+	contains(t, rows[0], "\twork:1.1  11m  The calendar wal…")
+	contains(t, rows[2], "\twork:2.1  ·    no transcript  s…")
+	if _, _, code := w.run("board", "--json", "--brief"); code == 0 {
+		t.Error("board --json --brief was not refused")
+	}
 }

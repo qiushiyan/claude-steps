@@ -202,3 +202,45 @@ func (r boardRow) noted() cell {
 	}
 	return c
 }
+
+// Brief prints one row per session for a list beside a session's view: its
+// pane, when its transcript last had a message, and its title, which gives
+// way to the width. The labels are the head's to show, so there is no header
+// line. With ids, every line starts as the board's do.
+func (v View) Brief(w io.Writer, sessions []Session, ids bool) {
+	rows := make([][]cell, len(sessions))
+	for i, s := range sessions {
+		rec := s.Record
+		// What could not be read comes before the title, so a cut takes the
+		// title's end and never the words.
+		title := boardRow{caveat: v.caveat(rec)}.mark()
+		if rec.Status == record.Missing || rec.Status == record.Unreadable {
+			title = of(problem, unread(rec)).add(plain, "  ")
+		}
+		row := []cell{{}, of(faint, nothing), title.add(plain, oneLine(v.title(s)))}
+		if s.Pane != nil {
+			row[0] = of(plain, s.Pane.Where)
+		}
+		if !rec.LastAt.IsZero() {
+			row[1] = of(plain, v.brief(rec.LastAt))
+		}
+		rows[i] = row
+	}
+	if v.Width > 0 {
+		at := starts(rows, boardGap)[2]
+		for _, row := range rows {
+			row[2] = row[2].cut(max(v.Width-at, 1))
+		}
+	}
+	for i, line := range v.lay(rows, boardGap) {
+		if ids {
+			pane := ""
+			if p := sessions[i].Pane; p != nil {
+				pane = p.ID
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\n", pane, sessions[i].Record.ID, line)
+			continue
+		}
+		fmt.Fprintln(w, line)
+	}
+}

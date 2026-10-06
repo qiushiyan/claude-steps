@@ -71,3 +71,19 @@ func (v View) brief(at time.Time) string {
 	}
 	return fmt.Sprintf("%d%s", n, u.short)
 }
+
+// sentence is a time inside a head's text: in words, or in a cell's units
+// when the head is narrow ("15m ago").
+func (v View) sentence(at time.Time, brief bool) string {
+	if !brief || at.IsZero() {
+		return v.ago(at)
+	}
+	n, u, future := v.since(at)
+	switch {
+	case n == 0:
+		return "now"
+	case future:
+		return fmt.Sprintf("in %d%s", n, u.short)
+	}
+	return fmt.Sprintf("%d%s ago", n, u.short)
+}

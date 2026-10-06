@@ -20,11 +20,11 @@ import (
 
 const usage = `claude-steps — what has happened in a Claude Code session, read from its transcript
 
-  claude-steps show [<pane>|<session>] [--all] [--json]   one session: its labels, notes and steps
-  claude-steps board [--json] [--ids]                     every Claude pane in tmux, one row each
-  claude-steps note <pane>|<session> <text…>              append a note to a session
-  claude-steps check                                      test the reader against recent transcripts
-  claude-steps import-notes <session id>                  merge notes from another machine, read on stdin
+  claude-steps show [<pane>|<session>] [--all] [--json|--head|--no-head]   one session: its labels, notes and steps
+  claude-steps board [--json] [--ids] [--brief]                           every Claude pane in tmux, one row each
+  claude-steps note <pane>|<session> <text…>                              append a note to a session
+  claude-steps check                                                      test the reader against recent transcripts
+  claude-steps import-notes <session id>                                  merge notes from another machine, read on stdin
 
 <pane> is a tmux pane id such as %12; show defaults to the pane it runs in.
 <session> is a session id, or its first eight or more characters.
@@ -66,8 +66,14 @@ commits made by git merge, rebase or cherry-pick, or through a script.
 import-notes takes the notes file of the same session from another machine
 and adds the notes this machine lacks; claude-tomini uses it.
 
+show --head prints what comes before the steps: the session, its labels, the
+rounds with no collect seen and the notes. show --no-head prints the steps
+alone, or with --all the history, with no heading. A popup shows the two side
+by side.
+
 board --ids starts every line with the pane id, a tab, the session id and a
-tab, for a picker.
+tab, for a picker. board --brief prints each session as its pane, when its
+transcript last had a message, and its title, with no header line.
 --json prints RFC 3339 times and no relative ones.
 check counts each fact two ways over the last week's transcripts. It exits
 non-zero when the transcripts cannot all be listed, when one is unreadable or
@@ -252,9 +258,15 @@ func (a *app) target(token string) (string, *panes.Pane, error) {
 }
 
 func (a *app) show(args []string) error {
-	set, rest, err := flags(args, "--json", "--all")
+	set, rest, err := flags(args, "--json", "--all", "--head", "--no-head")
 	if err != nil {
 		return err
+	}
+	switch {
+	case set["--head"] && set["--no-head"]:
+		return errors.New("show takes --head or --no-head, not both")
+	case set["--json"] && (set["--head"] || set["--no-head"]):
+		return errors.New("show --json prints the whole session")
 	}
 	var token string
 	switch len(rest) {
@@ -272,20 +284,29 @@ func (a *app) show(args []string) error {
 		return err
 	}
 	session := render.Session{Pane: pane, Record: a.loader.Load(id)}
-	if set["--json"] {
+	switch {
+	case set["--json"]:
 		return a.view.ShowJSON(a.stdout, session)
+	case set["--head"]:
+		a.view.Head(a.stdout, session, set["--all"])
+	case set["--no-head"]:
+		a.view.Timeline(a.stdout, session, set["--all"])
+	default:
+		a.view.Show(a.stdout, session, set["--all"])
 	}
-	a.view.Show(a.stdout, session, set["--all"])
 	return nil
 }
 
 func (a *app) board(args []string) error {
-	set, rest, err := flags(args, "--json", "--ids")
+	set, rest, err := flags(args, "--json", "--ids", "--brief")
 	if err != nil {
 		return err
 	}
-	if len(rest) > 0 {
+	switch {
+	case len(rest) > 0:
 		return errors.New("board takes no arguments")
+	case set["--json"] && set["--brief"]:
+		return errors.New("board --json prints every session in full")
 	}
 	live, err := a.livePanes()
 	if err != nil {
@@ -302,6 +323,10 @@ func (a *app) board(args []string) error {
 	}
 	if len(sessions) == 0 {
 		fmt.Fprintln(a.stderr, "claude-steps: no tmux pane runs a Claude session")
+		return nil
+	}
+	if set["--brief"] {
+		a.view.Brief(a.stdout, sessions, set["--ids"])
 		return nil
 	}
 	a.view.Board(a.stdout, sessions, set["--ids"])

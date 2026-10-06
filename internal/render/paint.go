@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/mattn/go-runewidth"
@@ -52,10 +53,12 @@ type span struct {
 }
 
 // cell is what one column holds in a row. A wide cell does not widen its
-// column: it runs over the columns after it, which its row leaves empty.
+// column: it runs over the columns after it, which its row leaves empty. A
+// note's cell is folded onto the rows under it rather than cut.
 type cell struct {
 	spans []span
 	wide  bool
+	note  bool
 }
 
 func of(st style, text string) cell {
@@ -66,6 +69,12 @@ func (c cell) add(st style, text string) cell {
 	if text != "" {
 		c.spans = append(c.spans, span{text, st})
 	}
+	return c
+}
+
+// join is c followed by the spans of d.
+func (c cell) join(d cell) cell {
+	c.spans = append(slices.Clone(c.spans), d.spans...)
 	return c
 }
 
@@ -221,6 +230,33 @@ func oneLine(s string) string {
 // clip puts s on one line and cuts it to n columns.
 func clip(s string, n int) string {
 	return cut(oneLine(s), n)
+}
+
+// wrap breaks s at its spaces into lines of at most n columns. A word wider
+// than n is broken across lines, so no word is lost.
+func wrap(s string, n int) []string {
+	var lines []string
+	for _, word := range strings.Fields(s) {
+		if k := len(lines); k > 0 && width(lines[k-1])+1+width(word) <= n {
+			lines[k-1] += " " + word
+			continue
+		}
+		for width(word) > n {
+			at, i := 0, 0
+			for j, r := range word {
+				if at += cells.RuneWidth(r); at > n {
+					i = j
+					break
+				}
+			}
+			if i == 0 { // n is narrower than one character
+				break
+			}
+			lines, word = append(lines, word[:i]), word[i:]
+		}
+		lines = append(lines, word)
+	}
+	return lines
 }
 
 // cut ends s at n columns with "…" when it is longer.

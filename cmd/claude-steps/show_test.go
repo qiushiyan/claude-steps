@@ -17,10 +17,11 @@ import (
 func TestShow(t *testing.T) {
 	w := newWorld(t)
 	out := w.ok("show", "%1")
-	// What the session is, on two lines and under a rule.
+	// What the session is, on two lines and under a rule: the second says
+	// where, and when the transcript last had a message.
 	contains(t, out,
 		"The calendar walks days once   aaaaaaaa   work:1.1\n"+
-			"/work/app  feat/thing   1 compaction, last 2 hours ago   PR #7145 opened here  https://github.com/acme/app/pull/7145\n"+
+			"/work/app  feat/thing   1 compaction, last 2 hours ago   last message 11 minutes ago   PR #7145 opened here  https://github.com/acme/app/pull/7145\n"+
 			strings.Repeat("─", 72)+"\n",
 	)
 	// The label lines come first: the latest review event is the second
@@ -286,7 +287,7 @@ func TestUnreadTranscriptsSayWhy(t *testing.T) {
 
 	// What the view may lack is said under the header, before the labels.
 	partial := w.ok("show", "%5")
-	contains(t, partial, "/work/app  feat/thing\n1 line could not be read\n─", "/review")
+	contains(t, partial, "/work/app  feat/thing   last message 3 hours ago\n1 line could not be read\n─", "/review")
 
 	// A transcript that was read and holds nothing says so in its own words.
 	fresh := fixture.ID("f0f0f0f0")
@@ -488,16 +489,90 @@ func TestTheSessionViewFitsTheWidth(t *testing.T) {
 		contains(t, out, strings.Repeat("─", 90)+"\n", "…\n")
 	}
 	// The pull requests take lines of their own once the header does not fit
-	// on one, newest first, and a link is never cut.
+	// on one, newest first, and a link is never cut: one with no room beside
+	// its name takes a line of its own.
 	w.env = map[string]string{"COLUMNS": "40"}
-	contains(t, w.ok("show", id), "/work/app  feat/thing\nPR #12 opened here  https://github.com/acme/app/pull/12\n"+strings.Repeat("─", 40)+"\n")
+	contains(t, w.ok("show", id), "/work/app  feat/thing\nlast message 3 hours ago\nPR #12 opened here\nhttps://github.com/acme/app/pull/12\n"+strings.Repeat("─", 40)+"\n")
 	tr.Compaction("manual", false, "summary")
 	tr.Raw(fixture.Row{"type": "pr-link", "prNumber": 13, "prUrl": "https://github.com/acme/app/pull/13", "prRepository": "acme/app"})
 	tr.Write(t, w.projects, "p", id)
 	w.env = map[string]string{"COLUMNS": "100"}
-	contains(t, w.ok("show", id), "/work/app  feat/thing   1 compaction, last 3 hours ago\n"+
+	contains(t, w.ok("show", id), "/work/app  feat/thing   1 compaction, last 3 hours ago   last message 3 hours ago\n"+
 		"PR #13 linked  https://github.com/acme/app/pull/13\n"+
 		"PR #12 opened here  https://github.com/acme/app/pull/12\n"+strings.Repeat("─", 100)+"\n")
+}
+
+// A popup shows a session's head beside its timeline, so each prints alone:
+// the head is what the view holds before its steps, and the timeline is the
+// steps, or the history, with no heading.
+func TestTheHeadAndTheTimelineApart(t *testing.T) {
+	w := newWorld(t)
+	w.ok("note", "%1", "a note")
+	for heading, flags := range map[string][]string{"steps": nil, "history": {"--all"}} {
+		show := func(more ...string) string { return w.ok(slices.Concat([]string{"show", "%1"}, flags, more)...) }
+		if whole, head, timeline := show(), show("--head"), show("--no-head"); whole != head+"\n"+heading+"\n"+timeline {
+			t.Errorf("%v: the view is not its head and its timeline:\n%s\n--- head\n%s\n--- timeline\n%s", flags, whole, head, timeline)
+		}
+	}
+	contains(t, w.ok("show", "%1", "--no-head"), "  note      now   a note\n", "\n12 rows in the full history (show --all)\n")
+
+	// A transcript that cannot be read says so in the timeline's place, and
+	// the head is the whole view.
+	if timeline := w.ok("show", "%3", "--no-head"); timeline != "no transcript\n" {
+		t.Errorf("a missing transcript's timeline: %q", timeline)
+	}
+	if head, whole := w.ok("show", "%4", "--head"), w.ok("show", "%4"); head != whole {
+		t.Errorf("an unreadable transcript's head is not its view:\n%s\n%s", head, whole)
+	}
+
+	for _, args := range [][]string{{"show", "%1", "--head", "--no-head"}, {"show", "%1", "--json", "--head"}, {"show", "%1", "--json", "--no-head"}} {
+		if _, _, code := w.run(args...); code == 0 {
+			t.Errorf("%v was not refused", args)
+		}
+	}
+}
+
+// Beside the timeline the head is narrow: a row gives its time as a cell
+// does, the title and an event's text are cut, an item that does not fit a
+// line starts the next, and a note is folded onto the rows under it with
+// every word kept. No row runs past the width.
+func TestANarrowHead(t *testing.T) {
+	w := newWorld(t)
+	w.ok("note", "%1", "the spike covered the verify pass, so skip it until the importer lands on the new schema")
+	w.env = map[string]string{"COLUMNS": "48"}
+	out := w.ok("show", "%1", "--head")
+	for _, row := range strings.Split(out, "\n") {
+		if screen.StringWidth(row) > 48 {
+			t.Errorf("a row takes %d columns:\n%s", screen.StringWidth(row), row)
+		}
+	}
+	contains(t, out,
+		"The calendar walks days once   aaaaaaaa\nwork:1.1\n/work/app  feat/thing\n1 compaction, last 2 hours ago\nlast message 11 minutes ago\n"+
+			"PR #7145 opened here\nhttps://github.com/acme/app/pull/7145\n"+strings.Repeat("─", 48)+"\n",
+		"review    2h    +1   review-r2 collected 2h ago…\n"+
+			"verify    15m   +0   skill pl-loopy-verify loca…\n"+
+			"prompts   12m        read skills/prompt-enginee…\n",
+		"notes             now   the spike covered the\n"+
+			"                        verify pass, so skip it\n"+
+			"                        until the importer lands\n"+
+			"                        on the new schema\n",
+	)
+	lacks(t, out, " ago   ", "commit since", "steps")
+
+	// A title wider than the head is cut, and a word wider than a note's
+	// room is broken across rows rather than lost. A note is folded no
+	// narrower than an event's text is cut.
+	id := fixture.ID("4e4e4e4e")
+	fixture.New().Title("A title far longer than the narrow head beside the steps").Prompt("start").Write(t, w.projects, "p", id)
+	w.ok("note", id, "see https://github.com/acme/app/pull/7145#discussion_r1")
+	w.env = map[string]string{"COLUMNS": "40"}
+	contains(t, w.ok("show", id, "--head"),
+		"A title far longer than the narrow head…\n4e4e4e4e\n",
+		"notes             now   see\n"+
+			"                        https://github.com/acme/\n"+
+			"                        app/pull/7145#discussion\n"+
+			"                        _r1\n",
+	)
 }
 
 // A dispatch that failed says so, and a fact with no time says that rather

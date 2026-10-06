@@ -45,6 +45,7 @@ const (
 	textWidth  = 96 // an event's text when the width is not known
 	textFloor  = 24 // the least room an event's text is cut to
 	ruleWidth  = 72 // the rule under the header when the width is not known
+	shortBelow = 80 // a head narrower than this gives a row's time as a cell does: "8m", "+1"
 	shown      = 3  // the notes and the uncollected rounds a session view lists
 	viewGap    = 3
 	boardGap   = 2
