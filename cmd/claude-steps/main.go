@@ -36,9 +36,10 @@ count line. A request (a paste, or a prompt or a slash command's words that
 name a skill) is said on every run and round under its label in the prompt
 that answered it: "pasted review-verify → review-r1". A slash command you
 typed is its own prompt's request. A skill's file read is a step only in
-answer to a request; any other read is in the history. A round is one step,
-at its dispatch: its name, what went wrong when something did, and the
-request or the skill run since the label's last round. show --all prints the
+answer to a request; any other read is in the history, and the line under
+the steps counts those of a labelled skill. A round is one step, at its
+dispatch: its name, what went wrong when something did, and the request or
+the skill run since the label's last round. show --all prints the
 whole timeline in the steps' place: skills run, skills' files read, snippets
 pasted, envoy rounds dispatched and collected, commits, pull requests,
 compactions, and your notes.

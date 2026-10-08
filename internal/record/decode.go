@@ -437,8 +437,11 @@ func (d *decoder) user(at time.Time, r row, text string, blocks []block) {
 		if human {
 			d.prompts++
 		}
-		typed := r.PromptSource == "typed" || r.PromptSource == "queued"
-		if typed {
+		// The second trace takes a source the reader does not know as the
+		// user's: should Claude Code mark typed prompts in a new way, check
+		// reports them missed where the steps would lose them in silence.
+		byUser := r.PromptSource != "" && r.PromptSource != "sdk" && r.PromptSource != "system"
+		if byUser {
 			d.sig.human.Second++
 			if !human {
 				d.sig.human.Missed++
@@ -643,7 +646,7 @@ func (d *decoder) finish() {
 	d.rec.Signals = []Signal{
 		d.sig.slash.as("skill, typed", "a slash command followed by its expansion / an expansion row with no tool call behind it"),
 		d.sig.tool.as("skill, model call", "a Skill tool call / an expansion row that names a tool call"),
-		d.sig.human.as("human prompt", "a prompt row with origin human / a row whose source is typed or queued"),
+		d.sig.human.as("human prompt", "a prompt row with origin human / a row whose source is neither sdk nor system"),
 		d.sig.round.as("envoy round", "an envoy run or collect in command position / a result of an envoy call holding its job and status lines, or a call whose job neither its text nor its result names"),
 		d.sig.commit.as("commit", "a git commit in command position / a result holding git's commit summary line"),
 		d.sig.pr.as("pull request", "a pull-request link row / a URL returned by gh pr create"),

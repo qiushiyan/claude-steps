@@ -138,8 +138,8 @@ func (v View) Timeline(w io.Writer, s Session, history bool) {
 }
 
 // body is the timeline under its heading: the steps, then how many rows the
-// full history holds; or with history, or with no label configured, the
-// whole timeline. A transcript that cannot be read leaves the notes, which
+// full history holds and how many labelled reads only it shows; or with
+// history, or with no label configured, the whole timeline. A transcript that cannot be read leaves the notes, which
 // outlive it, and nothing else.
 func (v View) body(w io.Writer, rec record.Record, history, heading bool) {
 	all := v.lines(rec)
@@ -165,7 +165,16 @@ func (v View) body(w io.Writer, rec record.Record, history, heading bool) {
 		}
 		v.timeline(w, st)
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, v.paint(of(faint, plural(len(collapse(all)), "row")+" in the full history (show --all)")))
+		foot := plural(len(collapse(all)), "row") + " in the full history (show --all)"
+		// A label's read nothing asked for is left to the history, which
+		// says so here: the label's `·` may stand over a stage asked for in
+		// words the reader does not match.
+		if n := record.ReadsLeftOut(rec.Events, v.Labels); n > 0 {
+			foot += ", with " + plural(n, "read") + " of a skill's file that no step shows"
+		}
+		for _, l := range v.fold(of(faint, foot)) {
+			fmt.Fprintln(w, v.paint(l))
+		}
 	}
 }
 

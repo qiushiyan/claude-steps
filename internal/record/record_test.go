@@ -327,6 +327,9 @@ func TestAReadIsAStepOnlyAsTheAnswerToARequest(t *testing.T) {
 	if prompts := Summarise(rec.Events, labels)[2]; prompts.Latest != nil {
 		t.Errorf("a lookup dates its label: %+v", prompts.Latest)
 	}
+	if n := ReadsLeftOut(rec.Events, labels); n != 1 {
+		t.Errorf("reads left out: %d, want 1", n)
+	}
 
 	tr.Prompt("now follow the prompt-engineering skill")
 	tr.Read(rulebook, false)
@@ -345,6 +348,9 @@ func TestAReadIsAStepOnlyAsTheAnswerToARequest(t *testing.T) {
 	}
 	if prompts := Summarise(rec.Events, labels)[2]; prompts.Latest == nil || !prompts.Latest.At.Equal(rec.Events[3].At) {
 		t.Errorf("prompts: %+v", prompts.Latest)
+	}
+	if n := ReadsLeftOut(rec.Events, labels); n != 2 {
+		t.Errorf("reads left out: %d, want the lookup and the read after the answer", n)
 	}
 }
 
@@ -882,5 +888,15 @@ func TestSignalsCountWhatTheReaderMissed(t *testing.T) {
 	// The pull request is shown from its URL, so the view warns of six.
 	if len(rec.Missed()) != 6 {
 		t.Errorf("Missed(): %+v", rec.Missed())
+	}
+	// A prompt from a source the reader does not know, with no origin, is
+	// one the reader may be losing; a notice or a program's prompt is not.
+	unknown := fixture.New()
+	unknown.Notification("a task finished")
+	unknown.Program("a digest")
+	unknown.Raw(fixture.Row{"type": "user", "timestamp": "2026-10-01T09:14:00.000Z", "promptSource": "dictated",
+		"message": fixture.Row{"content": "hello"}})
+	if s := signal(load(t, unknown), "human prompt"); s.Second != 1 || s.Missed != 1 {
+		t.Errorf("human prompt from an unknown source: %+v", s)
 	}
 }

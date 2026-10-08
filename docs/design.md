@@ -21,7 +21,9 @@ tells the model nothing.
 - **Unknown is shown as unknown.** A line that does not decode, a file or a
   directory that cannot be read and a fact the reader may have missed are
   all said at the top of the view, because a silent skip reads as "nothing
-  ran". The steps leave rows to the full history and say how many it holds.
+  ran". The steps leave rows to the full history and say how many it holds,
+  and how many reads of a labelled skill's file only it shows: a label's `·`
+  may stand over a stage asked for in words the reader does not match.
 - **One reader.** Every command gets a session from `record.Loader.Load`, so
   the board and the session view cannot disagree, and what happened under a
   label is read once, by `record.Steps`, so a label's row and its steps
@@ -72,9 +74,11 @@ Nothing persists between invocations except the notes.
   exclusive.
 - **`internal/record/steps.go`:** what happened under each label
   (`Steps`): which request each run, read or round came under, which reads
-  are steps, and which runs a round took. Each label is read on its own and the steps are merged by
-  event, so a run under two labels that a round of one takes is still a step
-  under the other. Render formats the steps and decides none of them.
+  are steps, and which runs a round took; and how many labelled reads are
+  none (`ReadsLeftOut`). Each label is read on its own and the steps are
+  merged by event, so a run under two labels that a round of one takes is
+  still a step under the other. Render formats the steps and decides none of
+  them.
 - **`internal/config`:** which files hold snippets, and what a snippet is
   reduced to: its key and the opening of its text. `loadSnippets` is the one
   reader of TabType's file. The set is built from the configuration alone
@@ -198,7 +202,9 @@ Nothing persists between invocations except the notes.
   origin are the user's only in a transcript where no row marks an origin or
   a source. A session a program started through the Agent SDK marks every
   prompt's source as `sdk` and none's origin, and none of its prompts is the
-  user's.
+  user's. The second trace for human prompts takes any source but `sdk` and
+  `system` as the user's, so a new way of marking typed prompts fails `check`
+  where the steps would lose them in silence.
 - **The Bash tool runs zsh here, which does not split an unquoted variable.**
   `C="git commit -q"; $C -m x` runs nothing. A function defined in the call
   does run where it is called, with the call's here-document as its input.

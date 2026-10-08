@@ -531,6 +531,38 @@ steps · newest first
 	contains(t, w.ok("show", id), "\nsteps · newest first\n  none\n\n1 row in the full history (show --all)\n")
 }
 
+// A read nothing asked for is left to the full history, and the line that
+// counts the history's rows says how many such reads it holds, since the
+// label's · may stand over a stage asked for in words the reader does not
+// match. A read a round took is the round's, and a skill no label lists is
+// no label's. At a known width the line folds at its spaces.
+func TestTheHistoryCountSaysTheReadsNoStepShows(t *testing.T) {
+	w := newWorld(t)
+	id := fixture.ID("bcbcbc78")
+	tr := fixture.New()
+	tr.Prompt("tidy the error messages")
+	tr.Read("/home/u/.claude/skills/prompt-engineering/SKILL.md", false)
+	tr.Read("/home/u/.claude/skills/prompt-engineering/SKILL.md", false)
+	tr.Read("/home/u/.claude/skills/unlabelled/SKILL.md", false)
+	tr.Prompt("follow skills/review/SKILL.md")
+	tr.Read("/home/u/.claude/skills/review/SKILL.md", false)
+	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
+	tr.Write(t, w.projects, "p", id)
+	out := w.ok("show", id)
+	contains(t, out, "prompts   ·\n",
+		"\n5 rows in the full history (show --all), with 2 reads of a skill's file that no step shows\n")
+	contains(t, w.ok("show", id, "--all"), "  prompts   3h   read skills/prompt-engineering/SKILL.md  (2 times)\n")
+
+	w.env = map[string]string{"COLUMNS": "40"}
+	out = w.ok("show", id)
+	for _, row := range strings.Split(out, "\n") {
+		if screen.StringWidth(row) > 40 {
+			t.Errorf("a row takes %d columns:\n%s", screen.StringWidth(row), row)
+		}
+	}
+	contains(t, strings.Join(strings.Fields(out), " "), "5 rows in the full history (show --all), with 2 reads of a skill's file that no step shows")
+}
+
 // Labels are not exclusive. A step under two is one row with both names,
 // and the commits beside it are counted once.
 func TestAStepUnderTwoLabels(t *testing.T) {
@@ -589,6 +621,7 @@ steps · newest first
 	tr.Write(t, w.projects, "p", id)
 	out = w.ok("show", id)
 	contains(t, out, "\nsteps · newest first\n  docs   3h   you: \"follow update-docs now\" → read skills/review/SKILL.md\n\n", "review   ·\n")
+	lacks(t, out, "no step shows")
 }
 
 // With no label configured there are no steps to pick, and the view is the

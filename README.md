@@ -78,20 +78,21 @@ A session view reads from the top, newest first:
 - **The labels:** one row for each, always: when its latest step happened,
   the commits made since where the label counts them, and the step. For a
   round the time and the count run from its dispatch. `·` says the label
-  has no step in the session; a read nothing asked for is in the history.
+  has no step in the session; a read nothing asked for is in the history,
+  and the view's last line counts it.
 - **`notes`:** your latest notes, one line each, cut where the width is
   known. `show --all` lists every one.
 - **`steps · newest first`:** what happened under each label, and your notes
   at the time you wrote them, each whole. A step is what ran, said with the
   request its prompt made, a skill's file read in answer to a request, or a
-  request nothing answered. A round is one
-  step, at its dispatch, and takes the skill's runs before it, so the
-  `review` lines count the review rounds. The commits between two steps are
-  one count line, and so are those after the newest step and before the
-  oldest; the commits above a round were made after its dispatch. A run of
-  the same line under the same labels is one line, at the time of its last,
-  with `(3 times)`. The last line says how many rows the full history
-  holds.
+  request nothing answered. A round is one step, at its dispatch, and takes
+  the skill's runs before it, so the `review` lines count the review
+  rounds. The commits between two steps are one count line, and so are those
+  after the newest step and before the oldest; the commits above a round
+  were made after its dispatch. A run of the same line under the same labels
+  is one line, at the time of its last, with `(3 times)`. The last line says
+  how many rows the full history holds, and how many reads of a labelled
+  skill's file only it shows.
 - **`show --all`** prints that history in the steps' place: every line below,
   each with the labels it is under. With no label configured, `show` prints
   it too.

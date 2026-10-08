@@ -54,7 +54,8 @@ func Steps(events []Event, labels []config.Label) []Step {
 	var merged []step
 	byIndex := map[int]int{} // event index → its place in merged
 	for _, l := range labels {
-		for _, s := range labelSteps(events, l) {
+		steps, _ := labelSteps(events, l)
+		for _, s := range steps {
 			at, ok := byIndex[s.index]
 			if !ok {
 				s.labels = []string{l.Name}
@@ -89,8 +90,9 @@ type step struct {
 	labels           []string
 }
 
-// labelSteps are the steps under one label, each without its labels.
-func labelSteps(events []Event, l config.Label) []step {
+// labelSteps are the steps under one label, each without its labels, and
+// the reads among them, which a round may since have taken.
+func labelSteps(events []Event, l config.Label) (steps []step, reads []int) {
 	var out []step
 	ask := -1              // a request nothing under the label has answered yet
 	said, saidIn := -1, 0  // the request said on the runs and rounds of prompt saidIn
@@ -167,6 +169,7 @@ func labelSteps(events []Event, l config.Label) []step {
 			if request, first := answer(e); first {
 				add(i).ask = request
 				loads = append(loads, len(out)-1)
+				reads = append(reads, i)
 			}
 		default:
 			add(i)
@@ -178,7 +181,27 @@ func labelSteps(events []Event, l config.Label) []step {
 			kept = append(kept, s)
 		}
 	}
-	return kept
+	return kept, reads
+}
+
+// ReadsLeftOut counts the reads of a labelled skill's file that only the
+// full history shows: each answered a request under none of its labels, so
+// it is no step and no round took it.
+func ReadsLeftOut(events []Event, labels []config.Label) int {
+	stepped := map[int]bool{}
+	for _, l := range labels {
+		_, reads := labelSteps(events, l)
+		for _, i := range reads {
+			stepped[i] = true
+		}
+	}
+	n := 0
+	for i, e := range events {
+		if e.Kind == Read && !stepped[i] && len(LabelsOf(labels, e)) > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // answers reports whether a run or round came in answer to a request: under
