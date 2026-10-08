@@ -645,3 +645,39 @@ Compare sessions started after this pass lands.
 - **Revise reading a command's arguments** if they name skills in passing
   more often than the 1 of 10 here: a request line under a label the user
   did not ask for.
+
+## 2026-10-08: the reads the steps leave out
+
+**Question.** The pass above leaves a read nothing asked for to the full
+history, so a label can show `·` over a stage the user asked for in words
+the reader misses (`35b6dc54`). Does a count of those reads under the steps
+reach that session and leave every other line alone, and does widening the
+second trace for human prompts to any source but `sdk` and `system` move
+`check`?
+
+**Corpus.** The mini's 237 transcripts over 200 KB last changed on or after
+2026-09-24, each rendered with `show` at `COLUMNS=200` by the binary built at
+`d4ce717` and by this pass's, back to back; `check` from both over the 266
+transcripts of the last 7 days.
+
+### Findings
+
+- **Views:** 23 of 237 change, each in its last line alone. 18 are the
+  user's sessions, with 28 reads between them (1 to 4 a session), and 5 are
+  sessions a program started, with 6.
+- **`35b6dc54`** counts 1 read under a `docs` row that shows `·`; `2e15f394`
+  counts the rulebook lookup that dated `prompts` before the pass above.
+- **`check`:** no drift. The human prompts the reader counts and the second
+  trace match, 603 and 603, the same as the earlier binary's.
+
+### Changed
+
+- **The line under the steps counts the reads of a labelled skill's file
+  that only the full history shows.**
+- **The second trace for human prompts takes any source but `sdk` and
+  `system` as the user's.**
+
+### Limits
+
+- The count says a read was left out, not why; `show --all` lists it.
+- The views were compared, not read by the user in the popup.
