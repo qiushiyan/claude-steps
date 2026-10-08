@@ -650,6 +650,8 @@ func TestMentions(t *testing.T) {
 	tr.Prompt("Review the implementation against the spec, obligation   by obligation, and report back. Use pl-loopy-verify after.")
 	tr.SlashOnly("review", "codex") // typed, and no expansion was seen
 	tr.Prompt("thanks")
+	tr.Prompt("Pickup gate: ~/.claude/skills/review/pickup/design.md") // another file of the skill's is not the skill
+	tr.Prompt("follow skills/review/SKILL.md")                         // its own file is
 	// A command's arguments are words typed like any other: they ask for the
 	// skills they name beside the command's own.
 	tr.Slash("review", "codex full, then pl-loopy-verify", "/home/u/.claude/skills/review")
@@ -664,6 +666,7 @@ func TestMentions(t *testing.T) {
 		"skill | slash | pl-loopy-verify | local spikes",
 		"snippet | review-implementation",
 		"mention | review | /review codex",
+		"mention | review | follow skills/review/SKILL.md",
 		"mention | pl-loopy-verify | /review codex full, then pl-loopy-verify | as /review",
 		"skill | slash | review | codex full, then pl-loopy-verify",
 		"mention | review+prompt-engineering | /review and prompt-engineering",

@@ -92,8 +92,10 @@ type mention struct {
 
 // compileMentions builds the matchers for the labelled skill names. A
 // hyphenated name counts wherever it stands as a word. A one-word name such
-// as "review" is ordinary English, so it counts only as "/review", inside a
-// "skills/review/" path, or as "review skill".
+// as "review" is ordinary English, so it counts only as "/review", as the
+// "skills/review/SKILL.md" file, or as "review skill". Another file in the
+// skill's directory is not the skill: a handoff's pickup names the handoff
+// skill's pickup/ files and asks for no handoff.
 func compileMentions(names []string) []mention {
 	const edge, end = `(^|[^\w/-])`, `($|[^\w-])`
 	var out []mention
@@ -103,7 +105,7 @@ func compileMentions(names []string) []mention {
 		if strings.Contains(name, "-") {
 			pattern = `(^|[^\w-])` + n + end
 		} else {
-			pattern = edge + `/` + n + end + `|skills/` + n + `/|` + edge + n + ` skill\b`
+			pattern = edge + `/` + n + end + `|skills/` + n + `/SKILL\.md|` + edge + n + ` skill\b`
 		}
 		out = append(out, mention{name: name, re: regexp.MustCompile(`(?i)` + pattern)})
 	}
