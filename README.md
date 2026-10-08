@@ -77,13 +77,14 @@ A session view reads from the top, newest first:
   in full says so on the next line.
 - **The labels:** one row for each, always: when its latest step happened,
   the commits made since where the label counts them, and the step. For a
-  round the time and the count run from its dispatch. `·` says nothing in
-  the session is under the label.
+  round the time and the count run from its dispatch. `·` says the label
+  has no step in the session; a read nothing asked for is in the history.
 - **`notes`:** your latest notes, one line each, cut where the width is
   known. `show --all` lists every one.
 - **`steps · newest first`:** what happened under each label, and your notes
   at the time you wrote them, each whole. A step is what ran, said with the
-  request that asked for it, or a request nothing answered. A round is one
+  request its prompt made, a skill's file read in answer to a request, or a
+  request nothing answered. A round is one
   step, at its dispatch, and takes the skill's runs before it, so the
   `review` lines count the review rounds. The commits between two steps are
   one count line, and so are those after the newest step and before the
@@ -102,28 +103,36 @@ What a line says:
   when the call returned an error.
 - **`read skills/x/SKILL.md`:** the model read a skill's file, as it does
   when a prompt names the skill or points at the path: a Read call, or a
-  `cat` that printed the file in a call that returned no error. A `cat` that
-  may have been skipped, or whose output went to a pipe or a file, is not a
-  read, and neither is a passage shown by `sed`, `head` or `grep`.
+  `cat` that printed the file in a call that returned no error. Among the
+  steps it is always the answer to a request; a read the model made to look
+  something up is in the history alone. A `cat` that may have been skipped,
+  or whose output went to a pipe or a file, is not a read, and neither is a
+  passage shown by `sed`, `head` or `grep`.
 - **`pasted <key>`:** a prompt holding the opening of a TabType snippet from
   a file `snippets` names. A prompt typed by hand with the same opening reads
   the same. A snippet that opens with a slash command and arrives as that
   command is the `/review  args` line and a `pasted` line at one time, and
   the paste is a step only under a label the run is not under.
-- **`you: "…"`:** a prompt that named a labelled skill. Your words, not a
-  run.
+- **`you: "…"`:** a prompt that named a labelled skill, or a slash command
+  whose words named another: `/review` counts, and so does
+  `skills/review/SKILL.md` or "review skill"; a hyphenated name counts as a
+  word. Your words, not a run.
 - **`<request> → <what ran>`:** a paste, a prompt that named the skill, or a
-  slash command you typed, and the step under the same label that answered
-  it: the first run or round made in the same prompt, or the slash command
-  you typed next. On a line of its own a request is one nothing under the
-  label answered there; the same request sent again before an answer is
-  one. A transcript that marks no prompt as yours answers no request. Where
-  the width is short the request gives way to what ran, and is left out
-  before what ran is cut.
+  slash command you typed, and a step under the same label that its prompt
+  asked for: the first run or round made in the same prompt, which answers
+  it, or the slash command you typed next, and every run and round after it
+  in that prompt. A run or a round with no `→` is one no request was found
+  for; a failed call and a round collected from elsewhere carry none. On a
+  line of its own a request is one nothing under the label answered there;
+  the same request sent again before an answer is one. A transcript that
+  marks no prompt as yours answers no request, and a session a program
+  started has no prompt of yours. Where the width is short the request
+  gives way to what ran, and is left out before what ran is cut.
 - **`review-r1`:** a round among the steps, at its dispatch. It takes the
   label's skill runs and reads since its last round, since every round the
   skill runs is dispatched, and says the latest request among them or made
-  in its own prompt: `/review args → review-r1`. With no request it says
+  in its own prompt: `/review args → review-r1`, and the same for each round
+  that prompt ran. With no request it says
   the model's own run: `review-r1  skill review  codex`. Runs and rounds are
   joined by their order alone. What went wrong is said after the name:
   - **`envoy said partial`:** envoy's status for the job when it is not
@@ -147,8 +156,8 @@ What a line says:
 On the board a label's cell is the time of its latest event (`11m`, `2d`);
 for a round that is the dispatch. `+2` counts the commits made since that
 event started; `read`, `pasted` or `named` in front says the latest event was
-only a file read, only a pasted snippet, or only a prompt that named the
-skill; `·` says nothing matches.
+only a file read in answer to a request, only a pasted snippet, or only a
+prompt that named the skill; `·` says the label has no step.
 
 A transcript that cannot be read says so (`no transcript`,
 `transcript unreadable`, `3 lines could not be read`) and is never drawn as an

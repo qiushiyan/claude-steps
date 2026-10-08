@@ -71,8 +71,8 @@ Nothing persists between invocations except the notes.
   commits since. A label is a board column with no state, and labels are not
   exclusive.
 - **`internal/record/steps.go`:** what happened under each label
-  (`Steps`): which run or round answered which request, and which runs a
-  round took. Each label is read on its own and the steps are merged by
+  (`Steps`): which request each run, read or round came under, which reads
+  are steps, and which runs a round took. Each label is read on its own and the steps are merged by
   event, so a run under two labels that a round of one takes is still a step
   under the other. Render formats the steps and decides none of them.
 - **`internal/config`:** which files hold snippets, and what a snippet is
@@ -125,8 +125,8 @@ Nothing persists between invocations except the notes.
   dispatches it stands for.
 - **Label state:** the label's latest step that did not fail, and the
   commits made after it started. For a round that start is the dispatch: a
-  reviewer reads the code as it stood then. A round whose run returned an error did not fail once it
-  was collected: a result came back. A prompt that only names a skill counts
+  reviewer reads the code as it stood then. A round whose run returned an
+  error did not fail once it was collected: a result came back. A prompt that only names a skill counts
   when nothing else matches, and never gets a commit count. A paste counts
   as a run does: it dates the label and starts the count. It is a request
   all the same, so the board's cell says `pasted`, as it says `read`.
@@ -134,17 +134,29 @@ Nothing persists between invocations except the notes.
   slash command with its arguments. As a command that loaded its skill it is
   the paste and the run, each an event at that time. Under a label that
   lists the command's skill the run is the prompt's one line, and under any
-  other label that lists its key the paste is a request. A pasted prompt is
-  not read for the skills it names.
+  other label that lists its key the paste is a request. A pasted prompt,
+  or a paste typed as a command, is not read for the skills it names.
 - **Request:** a paste, or a prompt that names a labelled skill; a slash
-  command the user typed is a request and its run at once. A request under a
-  label is answered by the first run, read or round under that label in the
-  same human prompt, or by the slash command typed in the next one, and is
-  said on that step's line. The same request sent again before an answer is
+  command the user typed is a request and its run at once, and the words
+  typed after it ask for the other labelled skills they name. A one-word
+  name is ordinary English, so it counts only as `/review`, as its
+  `skills/review/SKILL.md` or as "review skill"; another file in its
+  directory, such as the handoff skill's pickup files a brief names, asks
+  for nothing. A request under a label is answered by the first run, read or
+  round under that label in the same human prompt, or by the slash command
+  typed in the next one. It is then said on every run and dispatched round
+  under the label in the answering step's prompt, and a typed command that
+  answered nothing is its own prompt's request the same way: the `→` is the
+  only thing the steps say about asking, so a run or a round with none is
+  one the reader found no request for. A failed call and a round collected
+  from elsewhere carry none. The same request sent again before an answer is
   one. A request with no known prompt (a transcript that marks none as the
   user's) is answered by nothing.
-- **Step:** what happened under a label: a run, a read or a round, with the
-  request it answered, or a request nothing answered; and the user's notes.
+- **Step:** what happened under a label: a run or a round, with its
+  prompt's request; a read that answered a request; or a request nothing
+  answered; and the user's notes. A read is a step only as that answer: the
+  model prints a skill's file to look something up as often as to run a
+  skill asked for in prose, and a lookup would date a stage nobody ran.
   A session view lists the steps newest first, with the commits between two
   as one count line, under a heading that says the order, since a list read
   from the top otherwise reads as the order things ran in. Every other line
@@ -183,7 +195,10 @@ Nothing persists between invocations except the notes.
   `/init` answers with a meta prompt of its own, and a `Skill` call later in
   the same turn shares the command's `promptId`.
 - **Compaction summaries have no `origin` and name skills.** Rows without an
-  origin are the user's only in a transcript where no row carries one.
+  origin are the user's only in a transcript where no row marks an origin or
+  a source. A session a program started through the Agent SDK marks every
+  prompt's source as `sdk` and none's origin, and none of its prompts is the
+  user's.
 - **The Bash tool runs zsh here, which does not split an unquoted variable.**
   `C="git commit -q"; $C -m x` runs nothing. A function defined in the call
   does run where it is called, with the call's here-document as its input.
@@ -198,9 +213,9 @@ Nothing persists between invocations except the notes.
 - **A skill is loaded with no tool that names it.** Asked in prose to run a
   skill, the model often prints its file with `cat` and calls neither the
   Skill nor the Read tool (`docs/EVIDENCE.md`), so a `cat` whose output is
-  the call's own is a read. Nothing in the output proves it: `cat -n` numbers
-  the file's opening lines, and Claude Code sets a long output aside and
-  keeps its start. The read counts on the call's success, a guarded `cat`
+  the call's own is a read, and a step when a request asked for it. Nothing
+  in the output proves it: `cat -n` numbers the file's opening lines, and
+  Claude Code sets a long output aside and keeps its start. The read counts on the call's success, a guarded `cat`
   never counts, and a missing file followed by `; true` counts: that is a
   stated limit.
 - **A run's failure comes from the call and from envoy's own lines.** envoy
@@ -302,6 +317,17 @@ Nothing persists between invocations except the notes.
   `grep`): each shows a passage, and together they run more often than `cat`
   prints the file. A lookup after a run would become the label's latest
   event and restart its commit count (`docs/EVIDENCE.md`).
+- **A read no request answered, kept among the steps with a mark:** a step
+  dates its label, so the read would still date a stage nobody ran, or the
+  label's row and the steps would disagree.
+- **A mark on a run or a round that answered no request** ("unasked", a
+  glyph, a hue): the reader knows a request only by a skill's name, and most
+  rounds with none were asked for in prose (`docs/EVIDENCE.md`), so the mark
+  would be a verdict, wrong on most of the lines it sat on.
+- **A phrase around a one-word skill name as a request** ("update the
+  handoff"): the name is ordinary English, so the phrase would pair requests
+  with runs they did not ask for. A read asked for in such words stays in
+  the history.
 - **A project's snippet file found from the session's directory:** a session
   outlives its worktree, so a transcript would read as a paste while the
   work was open and as a mention after the merge (`docs/EVIDENCE.md`). The
