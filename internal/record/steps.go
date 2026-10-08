@@ -16,8 +16,9 @@ type Step struct {
 	Event  Event
 	Labels []string
 	// Ask is the request the step's prompt made under its label: a paste, a
-	// prompt that names a skill, or a slash command the user typed. With none,
-	// the reader found no request for it.
+	// prompt that names a skill, or a slash command the user typed. A run or
+	// a dispatched round with none is one the reader found no request for; a
+	// failed call and a round collected from elsewhere carry none.
 	Ask *Event
 	// Lent is the run of the model's own that a round took, whose words the
 	// round carries when no request is said.
@@ -28,11 +29,12 @@ type Step struct {
 // a label is answered by the first run, read or round under that label made
 // in the same human prompt, or by the slash command typed in the next one,
 // which is a prompt of its own; it is then that step's request and no step
-// there. It is said too on every later run and round under the label in the
-// answering step's prompt, and a slash command typed with nothing to answer
-// is its own prompt's request the same way, so a run with no request said is
-// one the reader found no request for. The same request sent again before an
-// answer is one. Where no prompt is known to be the user's, nothing says
+// there. It is said too on every later run and dispatched round under the
+// label in the answering step's prompt, and a slash command typed with
+// nothing to answer is its own prompt's request the same way, so such a step
+// with no request said is one the reader found no request for. A failed call
+// and a round collected from elsewhere answer nothing and say nothing. The
+// same request sent again before an answer is one. Where no prompt is known to be the user's, nothing says
 // which run answered which request, and they stay apart.
 //
 // A read is a step only as the answer to a request: asked in prose to run a

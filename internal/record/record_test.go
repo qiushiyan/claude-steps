@@ -349,23 +349,24 @@ func TestAReadIsAStepOnlyAsTheAnswerToARequest(t *testing.T) {
 }
 
 // A request is said on every run and round under its label in the prompt it
-// was answered in. A command typed to answer the previous prompt's paste
-// leaves the paste said there, not the command; a command typed with nothing
-// to answer is its own prompt's request. Where no prompt is known, nothing is
-// carried from one round to the next.
-func TestARequestIsSaidOnEveryRoundItsPromptRan(t *testing.T) {
-	rounds := func(tr *fixture.Transcript) []string {
+// was answered in, whether a run, a read or a round answered it. A command
+// typed to answer the previous prompt's paste leaves the paste said there,
+// not the command; a command typed with nothing to answer is its own
+// prompt's request. Where no prompt is known, nothing is carried from one
+// round to the next.
+func TestARequestIsSaidOnEveryStepItsPromptAskedFor(t *testing.T) {
+	said := func(tr *fixture.Transcript) []string {
 		rec := load(t, tr)
 		var got []string
 		for _, s := range Steps(rec.Events, labels) {
-			if s.Event.Kind != Round {
+			if s.Event.Kind == Snippet || s.Event.Kind == Mention {
 				continue
 			}
 			ask := "nothing"
 			if s.Ask != nil {
-				ask = string(s.Ask.Kind) + " " + s.Ask.Name
+				ask = strings.TrimSpace(string(s.Ask.Kind) + " " + s.Ask.Name)
 			}
-			got = append(got, s.Event.Name+" says "+ask)
+			got = append(got, fmt.Sprintf("%s %s says %s", s.Event.Kind, s.Event.Name, ask))
 		}
 		return got
 	}
@@ -383,8 +384,22 @@ func TestARequestIsSaidOnEveryRoundItsPromptRan(t *testing.T) {
 	dispatch(tr, "review-r3", "review-r4")
 	tr.Prompt("thanks")
 	dispatch(tr, "review-r5")
-	if got, expected := rounds(tr), []string{"review-r1 says snippet app-review-verify", "review-r2 says snippet app-review-verify",
-		"review-r3 says skill review", "review-r4 says skill review", "review-r5 says nothing"}; !reflect.DeepEqual(got, expected) {
+	if got, expected := said(tr), []string{"round review-r1 says snippet app-review-verify", "round review-r2 says snippet app-review-verify",
+		"round review-r3 says skill review", "round review-r4 says skill review", "round review-r5 says nothing"}; !reflect.DeepEqual(got, expected) {
+		t.Errorf("got  %q\nwant %q", got, expected)
+	}
+
+	// The model's second run of a skill its prompt asked for says the
+	// request, and so does the second round after a read answered it.
+	tr = fixture.New()
+	tr.Prompt("run pl-loopy-verify, twice")
+	tr.SkillCall("pl-loopy-verify", "one", "p1", false)
+	tr.SkillCall("pl-loopy-verify", "two", "p1", false)
+	tr.Prompt("follow skills/review/SKILL.md")
+	tr.Read("/home/u/.claude/skills/review/SKILL.md", false)
+	dispatch(tr, "review-r1", "review-r2")
+	if got, expected := said(tr), []string{"skill pl-loopy-verify says mention", "skill pl-loopy-verify says mention",
+		"round review-r1 says mention", "round review-r2 says mention"}; !reflect.DeepEqual(got, expected) {
 		t.Errorf("got  %q\nwant %q", got, expected)
 	}
 
@@ -394,7 +409,7 @@ func TestARequestIsSaidOnEveryRoundItsPromptRan(t *testing.T) {
 	old.Raw(fixture.Row{"type": "user", "timestamp": "2026-10-01T09:01:30.000Z", "isMeta": true, "promptId": typed,
 		"message": fixture.Row{"content": []fixture.Row{{"type": "text", "text": "Base directory for this skill: /home/u/.claude/skills/review"}}}})
 	dispatch(old, "review-r1", "review-r2")
-	if got, expected := rounds(old), []string{"review-r1 says skill review", "review-r2 says nothing"}; !reflect.DeepEqual(got, expected) {
+	if got, expected := said(old), []string{"round review-r1 says skill review", "round review-r2 says nothing"}; !reflect.DeepEqual(got, expected) {
 		t.Errorf("unmarked: got  %q\nwant %q", got, expected)
 	}
 }

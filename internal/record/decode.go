@@ -93,9 +93,9 @@ type mention struct {
 // compileMentions builds the matchers for the labelled skill names. A
 // hyphenated name counts wherever it stands as a word. A one-word name such
 // as "review" is ordinary English, so it counts only as "/review", as the
-// "skills/review/SKILL.md" file, or as "review skill". Another file in the
-// skill's directory is not the skill: a handoff's pickup names the handoff
-// skill's pickup/ files and asks for no handoff.
+// "skills/review/SKILL.md" file, or as "review skill". Another file in its
+// directory is not the skill: a handoff's pickup names the handoff skill's
+// pickup/ files and asks for no handoff.
 func compileMentions(names []string) []mention {
 	const edge, end = `(^|[^\w/-])`, `($|[^\w-])`
 	var out []mention
@@ -501,9 +501,15 @@ func (d *decoder) argued(c *slashCommand, names []string, ran string) {
 		}
 	}
 	if len(names) > 0 {
-		words := strings.Fields(pastedTag.ReplaceAllString("/"+c.name+" "+c.args, " "))
-		d.add(Event{At: c.at, Kind: Mention, Names: names, Text: clip(strings.Join(words, " "), openingWords), Command: ran})
+		d.mention(c.at, "/"+c.name+" "+c.args, names, ran)
 	}
+}
+
+// mention adds the request a prompt's words make for the skills they name,
+// said in the words' opening with Claude Code's paste tags left out.
+func (d *decoder) mention(at time.Time, text string, names []string, command string) {
+	words := strings.Fields(pastedTag.ReplaceAllString(text, " "))
+	d.add(Event{At: at, Kind: Mention, Names: names, Text: clip(strings.Join(words, " "), openingWords), Command: command})
 }
 
 // named are the labelled skills a prompt's words name.
@@ -528,8 +534,7 @@ func (d *decoder) prompt(at time.Time, text string) {
 		return
 	}
 	if names := d.named(text); len(names) > 0 {
-		words := strings.Fields(pastedTag.ReplaceAllString(text, " "))
-		d.add(Event{At: at, Kind: Mention, Names: names, Text: clip(strings.Join(words, " "), openingWords)})
+		d.mention(at, text, names, "")
 	}
 }
 

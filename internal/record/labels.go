@@ -80,20 +80,18 @@ func LabelsOf(labels []config.Label, e Event) []string {
 // belongs is the one rule for which label an event is under. Steps and
 // LabelsOf both read it.
 func belongs(l config.Label, e *Event) bool {
+	// A request typed as a slash command that loaded its skill is that
+	// command's run under a label that lists the skill: one prompt, one line
+	// there.
+	if e.Command != "" && slices.Contains(l.Skills, bareSkill(e.Command)) {
+		return false
+	}
 	switch e.Kind {
 	case Skill, Read:
 		return slices.Contains(l.Skills, bareSkill(e.Name))
 	case Snippet:
-		// A paste that arrived as a slash command is that command's run under
-		// a label that lists the command's skill: one prompt, one line there.
-		ran := e.Command != "" && slices.Contains(l.Skills, bareSkill(e.Command))
-		return slices.Contains(l.Snippets, e.Name) && !ran
+		return slices.Contains(l.Snippets, e.Name)
 	case Mention:
-		// Typed as a command's arguments, the words ask for other skills than
-		// the command's own: under a label that lists it, the run is the request.
-		if e.Command != "" && slices.Contains(l.Skills, bareSkill(e.Command)) {
-			return false
-		}
 		return slices.ContainsFunc(e.Names, func(n string) bool { return slices.Contains(l.Skills, n) })
 	case Round:
 		return slices.ContainsFunc(l.Jobs, func(prefix string) bool { return strings.HasPrefix(e.Name, prefix) })

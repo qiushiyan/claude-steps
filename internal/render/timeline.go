@@ -92,7 +92,8 @@ type line struct {
 	style  style
 	times  int  // how many equal lines in a row this one stands for
 	count  bool // a count of commits, which has no time of its own
-	// ask is the request a step answered, said before what ran.
+	// ask is the request the step's prompt made under its label, said before
+	// what ran.
 	ask *record.Event
 }
 
@@ -128,9 +129,8 @@ func round(e record.Event) (string, style) {
 }
 
 // outline is the timeline the steps are picked from, oldest first: the
-// session's steps as record.Steps reads them, each with the request it
-// answered or the run whose words a round carries, its commits, and its
-// notes. The full history keeps every event at its own time.
+// session's steps as record.Steps reads them, each with its prompt's request
+// or the run whose words a round carries, its commits, and its notes. The full history keeps every event at its own time.
 func (v View) outline(rec record.Record) []line {
 	steps := map[int]record.Step{}
 	for _, st := range record.Steps(rec.Events, v.Labels) {
@@ -252,7 +252,7 @@ func (v View) request(e record.Event, n int) string {
 	return cut(oneLine(v.describe(e)), n)
 }
 
-// sameAsk reports whether two lines answered the same request.
+// sameAsk reports whether two lines say the same request.
 func sameAsk(a, b *record.Event) bool {
 	if a == nil || b == nil {
 		return a == b

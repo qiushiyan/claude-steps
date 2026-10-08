@@ -152,11 +152,12 @@ steps · newest first
 	contains(t, w.ok("show", id), "\nsteps · newest first\n  review   3h   /review  one more\n  review   3h   review-r0\n")
 }
 
-// A request under a label is said on the step that answered it: the first
-// run or round under that label made in the same prompt. Asked in one prompt
-// and run in a later one, the two are lines of their own, and the same
-// request sent twice before anything answered it is one.
-func TestARequestIsSaidOnTheStepThatAnsweredIt(t *testing.T) {
+// A request under a label is said on the steps its prompt asked for: the
+// first run or round under that label made in the same prompt, which answers
+// it, and every run and round after it there. Asked in one prompt and run in
+// a later one, the two are lines of their own, and the same request sent
+// twice before anything answered it is one.
+func TestARequestIsSaidOnTheStepsItsPromptAskedFor(t *testing.T) {
 	w := newWorld(t)
 	projectSnippets(t, w)
 	id := fixture.ID("babe1234")

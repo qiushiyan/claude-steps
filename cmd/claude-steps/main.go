@@ -32,13 +32,16 @@ const usage = `claude-steps — what has happened in a Claude Code session, read
 show prints the newest first: each label's latest event and the commits made
 since, your notes, and the steps. A step is what ran under a label, a request
 nothing under it answered, or a note; the commits between two steps are one
-count line. A request (a paste, a prompt that names a skill) is said on the
-step that answered it, the first run under its label in the same prompt or
-the slash command typed next: "pasted review-verify → review-r1". A round is one step, at its dispatch: its
-name, what went wrong when something did, and the request or the skill run
-since the label's last round. show --all prints the whole timeline in the
-steps' place: skills run, snippets pasted, envoy rounds dispatched and
-collected, commits, pull requests, compactions, and your notes.
+count line. A request (a paste, or a prompt or a slash command's words that
+name a skill) is said on every run and round under its label in the prompt
+that answered it: "pasted review-verify → review-r1". A slash command you
+typed is its own prompt's request. A skill's file read is a step only in
+answer to a request; any other read is in the history. A round is one step,
+at its dispatch: its name, what went wrong when something did, and the
+request or the skill run since the label's last round. show --all prints the
+whole timeline in the steps' place: skills run, skills' files read, snippets
+pasted, envoy rounds dispatched and collected, commits, pull requests,
+compactions, and your notes.
 
 A view states what the transcript holds. It does not say a check is finished
 or still covers the code; a prompt that only names a skill is shown as your
@@ -46,7 +49,7 @@ words.
 
 On the board a label's cell is the time of its latest event ("11m", "2d");
 "+2" counts the commits made since that event started, "read" means a skill's
-file was read and not loaded, "pasted" means a snippet was pasted and nothing
+file was read in answer to a request and not loaded, "pasted" means a snippet was pasted and nothing
 under the label followed, "named" means a prompt named the skill and nothing
 more was seen. "!" before a title says the transcript was read with
 something missing; the session view says what.
