@@ -141,7 +141,8 @@ func TestAPasteFromAProjectsFile(t *testing.T) {
 	if err := os.Remove(local); err != nil {
 		t.Fatal(err)
 	}
-	contains(t, w.ok("board"), "2h +1   named 3h")
+	// The command's words are typed, not pasted, and ask for verify too.
+	contains(t, w.ok("board"), "2h +1   named 2h")
 	out := w.ok("show", "%7")
 	contains(t, out, `you: "/review full review. While you wait, run pl-loopy-verify on…"`)
 	lacks(t, out, "pasted")

@@ -70,6 +70,14 @@ func (t *Transcript) Prompt(text string) *Transcript {
 	return t
 }
 
+// Program is a prompt a program sent through the SDK: its row says where it
+// came from and has no origin.
+func (t *Transcript) Program(text string) *Transcript {
+	t.row("user", Row{"promptId": t.id("prompt"), "origin": nil, "promptSource": "sdk", "entrypoint": "sdk-cli",
+		"message": Row{"role": "user", "content": text}})
+	return t
+}
+
 // Notification is a background task's notice, which starts a turn of the
 // model's with no prompt from the user.
 func (t *Transcript) Notification(text string) *Transcript {

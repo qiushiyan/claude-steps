@@ -6,17 +6,18 @@ import (
 	"github.com/qiushiyan/claude-steps/internal/config"
 )
 
-// Step is one thing that happened under a set of labels: a run or a round,
-// said with the request that asked for it, or a request nothing answered.
-// A session's steps and each label's row are both read from the steps, so
-// the two cannot disagree about what happened under a label.
+// Step is one thing that happened under a set of labels: a run, a read or a
+// round, said with the request that asked for it, or a request nothing
+// answered. A session's steps and each label's row are both read from the
+// steps, so the two cannot disagree about what happened under a label.
 type Step struct {
 	// Index is the event's place among the events the steps were read from.
 	Index  int
 	Event  Event
 	Labels []string
-	// Ask is the request the step answered: a paste, a prompt that names a
-	// skill, or a slash command the user typed.
+	// Ask is the request the step's prompt made under its label: a paste, a
+	// prompt that names a skill, or a slash command the user typed. With none,
+	// the reader found no request for it.
 	Ask *Event
 	// Lent is the run of the model's own that a round took, whose words the
 	// round carries when no request is said.
@@ -24,12 +25,19 @@ type Step struct {
 }
 
 // Steps reads what happened under each label, oldest first. A request under
-// a label is answered by the first run or read under that label made in the
-// same human prompt, or by the slash command typed in the next one, which is
-// a prompt of its own; it is then that run's request and no step there. The
-// same request sent again before an answer is one. Where no prompt is known
-// to be the user's, nothing says which run answered which request, and they
-// stay apart.
+// a label is answered by the first run, read or round under that label made
+// in the same human prompt, or by the slash command typed in the next one,
+// which is a prompt of its own; it is then that step's request and no step
+// there. It is said too on every later run and round under the label in the
+// answering step's prompt, and a slash command typed with nothing to answer
+// is its own prompt's request the same way, so a run with no request said is
+// one the reader found no request for. The same request sent again before an
+// answer is one. Where no prompt is known to be the user's, nothing says
+// which run answered which request, and they stay apart.
+//
+// A read is a step only as the answer to a request: asked in prose to run a
+// skill, the model often prints its file and loads nothing, but it reads a
+// skill's file as often to look something up, and a lookup is no stage.
 //
 // Under a label that lists rounds a step is a round: every round a skill
 // there runs is dispatched, so the label's runs and reads since its last
@@ -83,11 +91,27 @@ type step struct {
 func labelSteps(events []Event, l config.Label) []step {
 	var out []step
 	ask := -1              // a request nothing under the label has answered yet
+	said, saidIn := -1, 0  // the request said on the runs and rounds of prompt saidIn
 	var loads []int        // the places in out of the runs and reads since the label's last round
 	gone := map[int]bool{} // events a later step took
 	add := func(i int) *step {
 		out = append(out, step{index: i, ask: -1, lent: -1})
 		return &out[len(out)-1]
+	}
+	// answer is the request a run, read or round came under: the one waiting,
+	// which it answers and which its prompt then says, or the one its prompt
+	// already says. first reports the first.
+	answer := func(e Event) (request int, first bool) {
+		if ask >= 0 && answers(events[ask], e) {
+			request = ask
+			gone[ask], ask = true, -1
+			said, saidIn = request, e.Prompt
+			return request, true
+		}
+		if said >= 0 && e.Prompt == saidIn {
+			return said, false
+		}
+		return -1, false
 	}
 	for i := range events {
 		e := events[i]
@@ -120,20 +144,28 @@ func labelSteps(events []Event, l config.Label) []step {
 					s.lent = load.index
 				}
 			}
-			if ask >= 0 && answers(events[ask], e) {
-				s.ask = max(s.ask, ask)
-				gone[ask], ask = true, -1
+			if request, _ := answer(e); request >= 0 {
+				s.ask = max(s.ask, request)
 			}
 			if s.ask >= 0 {
 				s.lent = -1
 			}
-		case e.Kind == Skill && !e.Failed, e.Kind == Read:
+		case e.Kind == Skill && !e.Failed:
 			s := add(i)
-			if ask >= 0 && answers(events[ask], e) {
-				s.ask = ask
-				gone[ask], ask = true, -1
+			request, first := answer(e)
+			switch {
+			case first || e.Via != "slash":
+				s.ask = request
+			case e.Prompt > 0:
+				// Typed with nothing to answer, the command is its prompt's request.
+				said, saidIn = i, e.Prompt
 			}
 			loads = append(loads, len(out)-1)
+		case e.Kind == Read:
+			if request, first := answer(e); first {
+				add(i).ask = request
+				loads = append(loads, len(out)-1)
+			}
 		default:
 			add(i)
 		}

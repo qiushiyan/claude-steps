@@ -12,7 +12,7 @@ import (
 // verdict; whether that event still covers the code is the reader's call.
 type LabelState struct {
 	Name string `json:"name"`
-	// Latest is nil when nothing in the session matches the label.
+	// Latest is nil when the label has no step in the session.
 	Latest *Event `json:"latest,omitempty"`
 	// CommitsSince counts the commits made after Latest. It is set when the
 	// label asks for it and Latest is more than a mention.
@@ -23,11 +23,12 @@ type LabelState struct {
 // the session's steps, so a label's row says what its steps say.
 //
 // A label's latest event is its latest step that did not fail: a run, a
-// read, a round, or a request nothing answered. A round whose run returned an
-// error and that was collected all the same did not fail: a result came
-// back. When there is none it is the latest prompt that named one of its
-// skills. Commits are counted from that event's time, which for a round is
-// its dispatch: a commit made while a review runs is not covered by it.
+// read that answered a request, a round, or a request nothing answered. A
+// round whose run returned an error and that was collected all the same did
+// not fail: a result came back. When there is none it is the latest prompt
+// that named one of its skills. Commits are counted from that event's time,
+// which for a round is its dispatch: a commit made while a review runs is not
+// covered by it.
 func Summarise(events []Event, labels []config.Label) []LabelState {
 	steps := Steps(events, labels)
 	out := make([]LabelState, 0, len(labels))
@@ -88,6 +89,11 @@ func belongs(l config.Label, e *Event) bool {
 		ran := e.Command != "" && slices.Contains(l.Skills, bareSkill(e.Command))
 		return slices.Contains(l.Snippets, e.Name) && !ran
 	case Mention:
+		// Typed as a command's arguments, the words ask for other skills than
+		// the command's own: under a label that lists it, the run is the request.
+		if e.Command != "" && slices.Contains(l.Skills, bareSkill(e.Command)) {
+			return false
+		}
 		return slices.ContainsFunc(e.Names, func(n string) bool { return slices.Contains(l.Skills, n) })
 	case Round:
 		return slices.ContainsFunc(l.Jobs, func(prefix string) bool { return strings.HasPrefix(e.Name, prefix) })

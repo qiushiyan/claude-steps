@@ -295,15 +295,130 @@ func TestSidechainToolCallsAreNotEvents(t *testing.T) {
 	}
 }
 
-// A skill file read after a run is the label's latest event: both are dated
-// activity, and the later one says what the session last did.
+// A skill file read in answer to a request after a run is the label's latest
+// event: both are dated activity, and the later one says what the session
+// last did.
 func TestLaterReadOutranksAnEarlierRun(t *testing.T) {
 	tr := fixture.New()
 	tr.Slash("review", "", "/home/u/.claude/skills/review")
+	tr.Prompt("follow skills/review/SKILL.md once more")
 	tr.Read("/home/u/.claude/skills/review/SKILL.md", false)
 	rec := load(t, tr)
 	if st := Summarise(rec.Events, labels)[0]; st.Latest == nil || st.Latest.Kind != Read {
 		t.Errorf("latest: %+v", st.Latest)
+	}
+}
+
+// A read is a step only as the answer to a request. The model reads a skill's
+// file as often to look something up as to run the skill, and a lookup is no
+// stage: it stays in the history and dates no label. Once a request is
+// answered, the same file read again under its prompt is a lookup too.
+func TestAReadIsAStepOnlyAsTheAnswerToARequest(t *testing.T) {
+	const rulebook = "/home/u/.claude/skills/prompt-engineering/SKILL.md"
+	tr := fixture.New()
+	tr.Prompt("tidy the error messages")
+	tr.Read(rulebook, false)
+	tr.Bash(`git commit -qm "one"`, "")
+	rec := load(t, tr)
+	want(t, rec, "read | prompt-engineering", "commit | one")
+	if steps := Steps(rec.Events, labels); len(steps) != 0 {
+		t.Errorf("a lookup is a step: %+v", steps)
+	}
+	if prompts := Summarise(rec.Events, labels)[2]; prompts.Latest != nil {
+		t.Errorf("a lookup dates its label: %+v", prompts.Latest)
+	}
+
+	tr.Prompt("now follow the prompt-engineering skill")
+	tr.Read(rulebook, false)
+	tr.Read(rulebook, false)
+	rec = load(t, tr)
+	var got []string
+	for _, s := range Steps(rec.Events, labels) {
+		ask := "no request"
+		if s.Ask != nil {
+			ask = string(s.Ask.Kind)
+		}
+		got = append(got, fmt.Sprintf("%d %s %s: %s", s.Index, s.Event.Kind, strings.Join(s.Labels, "+"), ask))
+	}
+	if expected := []string{"3 read prompts: mention"}; !reflect.DeepEqual(got, expected) {
+		t.Errorf("steps\n got %q\nwant %q", got, expected)
+	}
+	if prompts := Summarise(rec.Events, labels)[2]; prompts.Latest == nil || !prompts.Latest.At.Equal(rec.Events[3].At) {
+		t.Errorf("prompts: %+v", prompts.Latest)
+	}
+}
+
+// A request is said on every run and round under its label in the prompt it
+// was answered in. A command typed to answer the previous prompt's paste
+// leaves the paste said there, not the command; a command typed with nothing
+// to answer is its own prompt's request. Where no prompt is known, nothing is
+// carried from one round to the next.
+func TestARequestIsSaidOnEveryRoundItsPromptRan(t *testing.T) {
+	rounds := func(tr *fixture.Transcript) []string {
+		rec := load(t, tr)
+		var got []string
+		for _, s := range Steps(rec.Events, labels) {
+			if s.Event.Kind != Round {
+				continue
+			}
+			ask := "nothing"
+			if s.Ask != nil {
+				ask = string(s.Ask.Kind) + " " + s.Ask.Name
+			}
+			got = append(got, s.Event.Name+" says "+ask)
+		}
+		return got
+	}
+	dispatch := func(tr *fixture.Transcript, names ...string) {
+		for _, n := range names {
+			tr.Bash("envoy run "+n+" --with codex --prompt-file /tmp/p.md", "Command running in background")
+		}
+	}
+
+	tr := fixture.New()
+	tr.Prompt("<pasted_content id=\"1\">\n/review " + reviewVerify + "\n</pasted_content>")
+	tr.Slash("review", "codex full", "/home/u/.claude/skills/review")
+	dispatch(tr, "review-r1", "review-r2")
+	tr.Slash("review", "goal", "/home/u/.claude/skills/review")
+	dispatch(tr, "review-r3", "review-r4")
+	tr.Prompt("thanks")
+	dispatch(tr, "review-r5")
+	if got, expected := rounds(tr), []string{"review-r1 says snippet app-review-verify", "review-r2 says snippet app-review-verify",
+		"review-r3 says skill review", "review-r4 says skill review", "review-r5 says nothing"}; !reflect.DeepEqual(got, expected) {
+		t.Errorf("got  %q\nwant %q", got, expected)
+	}
+
+	old := fixture.New()
+	old.Unsourced("review the branch")
+	typed := old.SlashOnly("review", "codex")
+	old.Raw(fixture.Row{"type": "user", "timestamp": "2026-10-01T09:01:30.000Z", "isMeta": true, "promptId": typed,
+		"message": fixture.Row{"content": []fixture.Row{{"type": "text", "text": "Base directory for this skill: /home/u/.claude/skills/review"}}}})
+	dispatch(old, "review-r1", "review-r2")
+	if got, expected := rounds(old), []string{"review-r1 says skill review", "review-r2 says nothing"}; !reflect.DeepEqual(got, expected) {
+		t.Errorf("unmarked: got  %q\nwant %q", got, expected)
+	}
+}
+
+// A session a program started through the SDK marks every prompt's source and
+// none's origin. None of its prompts is the user's, so none is a request, and
+// a read its prompt asked for is no step: the session reads no stage as the
+// user's. A transcript that marks nothing is still read as the user's.
+func TestAProgramsPromptsAreNotTheUsers(t *testing.T) {
+	tr := fixture.New()
+	tr.Program("# Review: the calendar. Hold the prompts to skills/prompt-engineering/SKILL.md, then run pl-loopy-verify.")
+	tr.Read("/home/u/.claude/skills/prompt-engineering/SKILL.md", false)
+	tr.SkillCall("pl-loopy-verify", "spikes", "p1", false)
+	rec := load(t, tr)
+	want(t, rec, "read | prompt-engineering", "skill | tool | pl-loopy-verify | spikes")
+	states := Summarise(rec.Events, labels)
+	if prompts := states[2]; prompts.Latest != nil {
+		t.Errorf("prompts: %+v", prompts.Latest)
+	}
+	if verify := states[1]; verify.Latest == nil || verify.Latest.Kind != Skill {
+		t.Errorf("verify: %+v", verify.Latest)
+	}
+	if s := signal(rec, "human prompt"); s.Primary != 0 || s.Missed != 0 {
+		t.Errorf("human prompt signal: %+v", s)
 	}
 }
 
@@ -312,19 +427,21 @@ func TestLaterReadOutranksAnEarlierRun(t *testing.T) {
 // on its file as it calls a tool, and the prompt was then the only trace.
 func TestASkillFilePrintedByCatIsARead(t *testing.T) {
 	tr := fixture.New()
-	tr.Prompt("/review codex full, and run pl-loopy-verify while you wait")
-	tr.SkillCall("review", "codex full", "p", false)
+	tr.Slash("review", "codex full, and run pl-loopy-verify while you wait", "/home/u/.claude/skills/review")
 	tr.Bash("wc -c .agents/skills/pl-loopy-verify/SKILL.md && cat .agents/skills/pl-loopy-verify/SKILL.md", "9000 SKILL.md\n---\nname: pl-loopy-verify")
 	tr.Bash(`git commit -qm "fix"`, "")
 	rec := load(t, tr)
 	want(t, rec,
-		"mention | review+pl-loopy-verify | /review codex full, and run pl-loopy-verify while you wait",
-		"skill | tool | review | codex full",
+		"mention | pl-loopy-verify | /review codex full, and run pl-loopy-verify while you wait | as /review",
+		"skill | slash | review | codex full, and run pl-loopy-verify while you wait",
 		"read | pl-loopy-verify",
 		"commit | fix",
 	)
 	if verify := Summarise(rec.Events, labels)[1]; verify.Latest == nil || verify.Latest.Kind != Read || verify.CommitsSince == nil || *verify.CommitsSince != 1 {
 		t.Errorf("verify: %+v", verify)
+	}
+	if review := Summarise(rec.Events, labels)[0]; review.Latest == nil || review.Latest.Kind != Skill {
+		t.Errorf("review: %+v", review)
 	}
 
 	for src, want := range map[string]string{
@@ -510,6 +627,10 @@ func TestAnEventCanBeUnderSeveralLabels(t *testing.T) {
 		{Event{Kind: Round, Name: "spike-r1"}, ""},
 		{Event{Kind: Mention, Names: []string{"update-docs"}}, "docs"},
 		{Event{Kind: Mention, Names: []string{"review", "update-docs"}}, "review docs"},
+		// Typed as a command's arguments, the words ask for nothing under a
+		// label that lists the command's skill: the run is the request there.
+		{Event{Kind: Mention, Names: []string{"update-docs"}, Command: "plugin:review"}, ""},
+		{Event{Kind: Mention, Names: []string{"update-docs"}, Command: "consult"}, "docs"},
 		{Event{Kind: Commit, Text: "review"}, ""},
 	} {
 		if got := strings.Join(LabelsOf(overlapping, c.e), " "); got != c.want {
@@ -529,6 +650,12 @@ func TestMentions(t *testing.T) {
 	tr.Prompt("Review the implementation against the spec, obligation   by obligation, and report back. Use pl-loopy-verify after.")
 	tr.SlashOnly("review", "codex") // typed, and no expansion was seen
 	tr.Prompt("thanks")
+	// A command's arguments are words typed like any other: they ask for the
+	// skills they name beside the command's own.
+	tr.Slash("review", "codex full, then pl-loopy-verify", "/home/u/.claude/skills/review")
+	tr.SlashOnly("review", "and prompt-engineering")
+	tr.SlashOnly("model", "opus")
+	tr.Prompt("thanks")
 	tr.Prompt(`<pasted_content id="4463"> then run pl-loopy-verify </pasted_content> on it`) // the tag is Claude Code's
 	want(t, load(t, tr),
 		"mention | pl-loopy-verify | run pl-loopy-verify with local spikes to re-prove the behavi…",
@@ -537,6 +664,9 @@ func TestMentions(t *testing.T) {
 		"skill | slash | pl-loopy-verify | local spikes",
 		"snippet | review-implementation",
 		"mention | review | /review codex",
+		"mention | pl-loopy-verify | /review codex full, then pl-loopy-verify | as /review",
+		"skill | slash | review | codex full, then pl-loopy-verify",
+		"mention | review+prompt-engineering | /review and prompt-engineering",
 		"mention | pl-loopy-verify | then run pl-loopy-verify on it",
 	)
 }
@@ -640,13 +770,13 @@ func TestEventsKnowThePromptTheyCameUnder(t *testing.T) {
 
 func TestMentionOnlyLabelHasNoCommitCount(t *testing.T) {
 	tr := fixture.New()
-	tr.Prompt("have we run pl-loopy-verify yet?")
+	tr.Prompt("have we run pl-loopy-verify? then use prompt-engineering")
 	tr.Bash(`git commit -m "x"`, "")
 	tr.Read("/home/u/.claude/skills/prompt-engineering/SKILL.md", false)
 	tr.Read("/home/u/.claude/skills/review/SKILL.md", true)
 	rec := load(t, tr)
 	want(t, rec,
-		"mention | pl-loopy-verify | have we run pl-loopy-verify yet?",
+		"mention | pl-loopy-verify+prompt-engineering | have we run pl-loopy-verify? then use prompt-engineering",
 		"commit | x",
 		"read | prompt-engineering",
 	)

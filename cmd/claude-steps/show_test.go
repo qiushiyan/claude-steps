@@ -35,17 +35,17 @@ func TestShow(t *testing.T) {
 	)
 	// The steps, newest first: what is under a label, a round as one line at
 	// its dispatch with the command that asked for it, and the commits between
-	// as a count.
+	// as a count. Every round the command's prompt ran says the command.
 	contains(t, out, `
 steps · newest first
-  prompts   12m   read skills/prompt-engineering/SKILL.md
+  prompts   12m   you: "then hold the new prompts to pro…" → read skills/prompt-engineering/SKILL.md
   verify    15m   skill pl-loopy-verify  local spikes
                   1 commit
-  review    2h    review-r2  envoy said partial
+  review    2h    /review codex full review → review-r2  envoy said partial
                   1 commit
   review    3h    /review codex full review → review-r1
 
-11 rows in the full history (show --all)
+12 rows in the full history (show --all)
 `)
 	lacks(t, out, "compaction (manual)", "commit  ", "history · newest first", "dispatched", "collected", "no collect seen")
 
@@ -53,8 +53,8 @@ steps · newest first
 	// count is the rows it holds.
 	all := w.ok("show", "%1", "--all")
 	_, history, found := strings.Cut(all, "\nhistory · newest first\n")
-	if rows := strings.Count(history, "\n"); !found || rows != 11 {
-		t.Errorf("want 11 rows of history, got %d:\n%s", rows, all)
+	if rows := strings.Count(history, "\n"); !found || rows != 12 {
+		t.Errorf("want 12 rows of history, got %d:\n%s", rows, all)
 	}
 	contains(t, all,
 		"  prompts   12m   read skills/prompt-engineering/SKILL.md\n",
@@ -112,8 +112,9 @@ func TestARoundIsOneStepAtItsDispatch(t *testing.T) {
 
 // Under a label that lists rounds a step is a round. The skill's runs since
 // the label's last round are the round's, and the latest command typed among
-// them is on its line; a run no round took keeps a line of its own, and a
-// round that followed another has nothing to carry.
+// them is on its line; a round that followed another in the command's prompt
+// says the command too. A run no round took keeps a line of its own, and a
+// round collected from elsewhere has nothing to carry.
 func TestARoundCarriesTheSkillRunBeforeIt(t *testing.T) {
 	w := newWorld(t)
 	id := fixture.ID("abab5656")
@@ -133,7 +134,7 @@ func TestARoundCarriesTheSkillRunBeforeIt(t *testing.T) {
 steps · newest first
   review   3h   review-r0
   verify   3h   skill pl-loopy-verify  spikes
-  review   3h   review-r2
+  review   3h   /review codex full → review-r2
                 1 commit
   review   3h   /review codex full → review-r1
                 1 commit
@@ -198,8 +199,9 @@ steps · newest first
 
 	// A round takes the request made in its own prompt over one an earlier
 	// run of the skill answered, and answers a request with no run between.
-	// A run of the model's own, asked for by nothing, lends the round its
-	// words.
+	// The prompt's request is said on every round it ran, after a task
+	// notification too. Under a prompt that asks for nothing, a run of the
+	// model's own lends the round its words.
 	tr = fixture.New()
 	tr.Prompt("now run the review skill on the branch")
 	tr.SkillCall("review", "codex full review", "p1", false)
@@ -210,24 +212,30 @@ steps · newest first
 	tr.Notification("review-r2 finished")
 	tr.SkillCall("review", "codex, the fixes", "p3", false)
 	tr.Bash("envoy run review-r3 --with codex --prompt-file /tmp/r3.md", "Command running in background")
+	tr.Prompt("thanks, carry on")
+	tr.SkillCall("review", "codex, the last fixes", "p4", false)
+	tr.Bash("envoy run review-r4 --with codex --prompt-file /tmp/r4.md", "Command running in background")
 	tr.Write(t, w.projects, "p", id)
 	out = w.ok("show", id, "--no-head")
-	contains(t, out, "  review   3h   review-r3  skill review  codex, the fixes\n"+
+	contains(t, out, "  review   3h   review-r4  skill review  codex, the last fixes\n"+
+		"  review   3h   pasted app-review-verify → review-r3\n"+
 		"  review   3h   pasted app-review-verify → review-r2\n"+
 		"  verify   3h   pasted app-review-verify\n"+
 		"  review   3h   pasted app-review-verify → review-r1\n\n")
 	lacks(t, out, "now run the review", "codex full review")
 
 	// With no prompt marked as the user's, nothing says which prompt a run
-	// answered, and a request and a run stay apart.
+	// answered, and a request and a run stay apart. A read there answers
+	// nothing, so it is no step.
 	tr = fixture.New()
 	tr.Unsourced("run pl-loopy-verify now")
 	tr.Unsourced("then something else entirely")
 	tr.Read("/home/u/.claude/skills/pl-loopy-verify/SKILL.md", false)
+	tr.SkillCall("pl-loopy-verify", "now", "p", false)
 	tr.Write(t, w.projects, "p", id)
 	out = w.ok("show", id, "--no-head")
-	contains(t, out, "  verify   3h   read skills/pl-loopy-verify/SKILL.md\n  verify   3h   you: \"run pl-loopy-verify now\"\n")
-	lacks(t, out, "→")
+	contains(t, out, "  verify   3h   skill pl-loopy-verify  now\n  verify   3h   you: \"run pl-loopy-verify now\"\n")
+	lacks(t, out, "→", "read skills")
 
 	// A prompt whose quotes are escaped where it is said still keeps to its
 	// room, and its closing quote.
@@ -362,7 +370,7 @@ func TestShowJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if got.Pane != "%1" || got.ID != worked || got.Status != "ok" || len(got.Events) != 9 || !got.Events[0].At.Equal(fixture.Start) {
+	if got.Pane != "%1" || got.ID != worked || got.Status != "ok" || len(got.Events) != 10 || !got.Events[0].At.Equal(fixture.Start) {
 		t.Errorf("record: %+v", got)
 	}
 	if len(got.PullRequests) != 1 || !got.PullRequests[0].OpenedHere || len(got.Compactions) != 1 || got.Notes == nil {
@@ -565,12 +573,21 @@ steps · newest first
 	// the other, and the label's row there says it.
 	w.env = nil
 	tr = fixture.New()
-	tr.Read("/home/u/.claude/skills/review/SKILL.md", false)
+	tr.SkillCall("review", "codex", "p", false)
 	tr.Bash("envoy run review-r1 --with codex --prompt-file /tmp/r1.md", "Command running in background")
 	tr.Write(t, w.projects, "p", id)
 	out = w.ok("show", id)
-	contains(t, out, "\nsteps · newest first\n  review   3h   review-r1\n  docs     3h   read skills/review/SKILL.md\n\n",
-		"docs     3 hours ago                     read skills/review/SKILL.md\n")
+	contains(t, out, "\nsteps · newest first\n  review   3h   review-r1  skill review  codex\n  docs     3h   skill review  codex\n\n",
+		"docs     3 hours ago                     skill review codex\n")
+
+	// A read is a step only under a label its prompt asked for, though the
+	// other lists its skill too.
+	tr = fixture.New()
+	tr.Prompt("follow update-docs now")
+	tr.Read("/home/u/.claude/skills/review/SKILL.md", false)
+	tr.Write(t, w.projects, "p", id)
+	out = w.ok("show", id)
+	contains(t, out, "\nsteps · newest first\n  docs   3h   you: \"follow update-docs now\" → read skills/review/SKILL.md\n\n", "review   ·\n")
 }
 
 // With no label configured there are no steps to pick, and the view is the
@@ -632,7 +649,7 @@ func TestTheHeadAndTheTimelineApart(t *testing.T) {
 			t.Errorf("%v: the view is not its head and its timeline:\n%s\n--- head\n%s\n--- timeline\n%s", flags, whole, head, timeline)
 		}
 	}
-	contains(t, w.ok("show", "%1", "--no-head"), "  note      now   a note\n", "\n12 rows in the full history (show --all)\n")
+	contains(t, w.ok("show", "%1", "--no-head"), "  note      now   a note\n", "\n13 rows in the full history (show --all)\n")
 
 	// The head lists the latest notes, and with --all every one.
 	for _, text := range []string{"second", "third", "fourth"} {

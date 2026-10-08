@@ -152,9 +152,9 @@ type decoder struct {
 	prs        map[string]int       // pull request URL → its event
 	created    map[string]time.Time // URLs `gh pr create` returned → the call
 	slash      *slashCommand        // a slash command waiting for its expansion
-	sawOrigin  bool
-	prompts    int      // the human prompts read so far
-	unsourced  []prompt // prompts with no origin, used when no row carries one
+	marked     bool                 // a row said whose prompt it was or where it came from
+	prompts    int                  // the human prompts read so far
+	unsourced  []prompt             // prompts with no origin, used when no row is marked
 
 	sig struct{ slash, tool, pr, compaction, human, commit, round Signal }
 }
@@ -372,8 +372,8 @@ func (d *decoder) bashCommand(at time.Time, command string, background bool) *ba
 }
 
 func (d *decoder) user(at time.Time, r row, text string, blocks []block) {
-	if r.Origin != nil {
-		d.sawOrigin = true
+	if r.Origin != nil || r.PromptSource != "" {
+		d.marked = true
 	}
 	results := false
 	for _, b := range blocks {
@@ -420,9 +420,12 @@ func (d *decoder) user(at time.Time, r row, text string, blocks []block) {
 		// open with the skill's line.
 		if follows && expansion {
 			// The paste comes first: it is the prompt, and the run is what
-			// the prompt did.
+			// the prompt did. So do the other skills the arguments ask for.
 			for _, key := range waiting.pasted {
 				d.add(Event{At: waiting.at, Kind: Snippet, Name: key, Command: waiting.name})
+			}
+			if len(waiting.pasted) == 0 {
+				d.argued(waiting, nil, waiting.name)
 			}
 			d.add(Event{At: waiting.at, Kind: Skill, Via: "slash", Name: waiting.name, Args: clip(waiting.args, argsMax)})
 			d.sig.slash.Primary++
@@ -476,10 +479,40 @@ func (d *decoder) unexpanded(c *slashCommand) {
 	if len(c.pasted) > 0 {
 		return
 	}
-	name := bareSkill(c.name)
-	if d.labelled[name] {
-		d.add(Event{At: c.at, Kind: Mention, Names: []string{name}, Text: clip(strings.TrimSpace("/"+c.name+" "+c.args), openingWords)})
+	var names []string
+	if name := bareSkill(c.name); d.labelled[name] {
+		names = append(names, name)
 	}
+	d.argued(c, names, "")
+}
+
+// argued lifts the request a typed command makes: the labelled skills its
+// arguments name, after the names already known to be asked for. ran is the
+// command when it loaded its skill: the run is then the request under a
+// label that lists that skill, and the arguments are one only under others.
+// A paste typed as a command is not read for names, as a pasted prompt is
+// not.
+func (d *decoder) argued(c *slashCommand, names []string, ran string) {
+	for _, n := range d.named(c.args) {
+		if n != bareSkill(c.name) && !slices.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
+	if len(names) > 0 {
+		words := strings.Fields(pastedTag.ReplaceAllString("/"+c.name+" "+c.args, " "))
+		d.add(Event{At: c.at, Kind: Mention, Names: names, Text: clip(strings.Join(words, " "), openingWords), Command: ran})
+	}
+}
+
+// named are the labelled skills a prompt's words name.
+func (d *decoder) named(text string) []string {
+	var names []string
+	for _, m := range d.mentions {
+		if m.re.MatchString(text) {
+			names = append(names, m.name)
+		}
+	}
+	return names
 }
 
 // prompt lifts what a human prompt shows: a pasted snippet, or failing that
@@ -492,13 +525,7 @@ func (d *decoder) prompt(at time.Time, text string) {
 	if len(pasted) > 0 {
 		return
 	}
-	var names []string
-	for _, m := range d.mentions {
-		if m.re.MatchString(text) {
-			names = append(names, m.name)
-		}
-	}
-	if len(names) > 0 {
+	if names := d.named(text); len(names) > 0 {
 		words := strings.Fields(pastedTag.ReplaceAllString(text, " "))
 		d.add(Event{At: at, Kind: Mention, Names: names, Text: clip(strings.Join(words, " "), openingWords)})
 	}
@@ -571,9 +598,11 @@ func (d *decoder) finish() {
 	if d.slash != nil {
 		d.unexpanded(d.slash)
 	}
-	// Transcripts from before Claude Code marked a prompt's origin: take the
-	// plain text rows as the user's own.
-	if !d.sawOrigin {
+	// Transcripts from before Claude Code marked a prompt's origin or source:
+	// take the plain text rows as the user's own. A session a program started
+	// marks every prompt's source and no origin, and none of them is the
+	// user's.
+	if !d.marked {
 		for _, p := range d.unsourced {
 			t := strings.TrimSpace(p.text)
 			if strings.HasPrefix(t, "<") || strings.HasPrefix(t, "[Request interrupted") || strings.HasPrefix(t, "/") {

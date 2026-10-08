@@ -54,7 +54,8 @@ type Event struct {
 	// the model made ("tool").
 	Via string `json:"via,omitempty"`
 	// Command is the skill a pasted snippet ran by arriving as a slash
-	// command: the run is an event of its own, at the same time.
+	// command, or the skill a mention's words were typed as the arguments of:
+	// the run is an event of its own, at the same time.
 	Command string `json:"command,omitempty"`
 	// Failed: the skill call, or the call that ran envoy for a round,
 	// returned an error. A round's run did not fail when envoy's own output
