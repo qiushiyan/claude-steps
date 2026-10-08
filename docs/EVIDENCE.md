@@ -533,3 +533,115 @@ Compare sessions started after 2026-10-06 that hold a review round.
   other than a slash command, grow past the 21 of 307 here.
 - **Revise the round's reach** if a review run with no round of its own is
   wanted among the steps.
+
+## 2026-10-08: a step the user asked for and one the model took
+
+**Question.** The user saw a `prompts` stage they had not run: the board
+said `read 2h` and the steps `prompts 2h read skills/prompt-engineering/SKILL.md`
+in `2e15f394`, where the model had read the rulebook on its own before
+editing a skill. Can the steps tell a step the user's prompt asked for from
+one the model took, and does a session a program started read as the user's?
+
+**Corpus.** The mini's transcripts over 200 KB last changed on or after
+2026-09-24: 229 when the findings were counted, 236 when the change was
+measured. Each step was classed from `record.Steps` by a measuring command
+built beside a copy of the code, and each view rendered with `show` and
+`show --json` at `COLUMNS=200` by the binary built at `b759c36` and by this
+pass's, back to back. On the laptop, only each transcript's prompt rows were
+read for their origin and source: 769 transcripts.
+
+### Findings
+
+- **An unasked read dated its label.** Of 67 reads among the steps, 31
+  answered a request. 30 came under a known prompt that had made none under
+  their label (24), or after an earlier step had answered it (6); 6 came in
+  sessions a program started. One rater reading the opening of the 24
+  prompts: 18 lookups, loads chained from a skill the user typed
+  (`/strategic-review` reading the rulebook, 4) or study of a skill being
+  edited; 6 asked in words the reader did not match, 2 of them a stage the
+  label stands for (`35b6dc54`, `8706846f`).
+- **A missing request does not mean the model acted alone for runs and
+  rounds.** Of 194 rounds, 51 answered a request. Of the rest, 34 came under
+  a prompt whose request an earlier round had answered (`review-r2` after
+  `review-r1` under one paste in `2e15f394`). Of the other 109, a keyword
+  check finds 80 under a prompt that names the stage (consult, review, a
+  voice's name, a typed `/write-spec`) and 11 under one that only tells the
+  session to go on. Of 88 skill runs the model made, 20 answered a request.
+- **A typed command's arguments were never read,** so a skill named there
+  was asked for unseen: 2 of the 6 missed requests above (`8706846f`,
+  `21399e2e`).
+- **Sessions a program started read as the user's.** 86 of the 229 mark
+  every prompt's source as `sdk` and none's origin, and the reader took
+  every unmarked prompt as the user's: `60e0427b` showed its brief as the
+  user's request under `prompts`, and the daily digests one under `verify`.
+  On both machines every transcript with a source and no origin says `sdk`
+  (144 on the mini, 253 on the laptop). The laptop holds 23 transcripts that
+  mark neither, the last written on 2026-09-07.
+- **A handoff's pickup read as a request for the handoff skill.** Of 1144
+  human prompts, 32 name a file under `skills/handoff/pickup/` and 1 the
+  skill's `SKILL.md`; the one-word name matched any path in the skill's
+  directory, so each pickup was a `docs` request (`f6bb6a58`).
+
+### Changed
+
+- **A read is a step only as the first answer to a request** under its
+  label. Any other read stays in the full history and dates no label.
+- **A request is said on every run and dispatched round under its label**
+  in the prompt that answered it, and a slash command typed with nothing to
+  answer is its own prompt's request; such a step with no `→` is one the
+  reader found no request for. A failed call and a round collected from
+  elsewhere carry none. Runs and rounds carry no other mark.
+- **A typed command's arguments are read** for the labelled skills they
+  name besides the command's own, unless the command is a paste.
+- **Rows with no origin are the user's prompts only in a transcript where
+  no row marks an origin or a source.**
+- **A one-word skill name counts as a path only as its `SKILL.md`.**
+
+### Measured after
+
+- **Views:** 73 of 236 change. Step rows (stages and notes, without the
+  commit counts) 660 to 602; rows that say a request 108 to 153; read steps
+  64 to 36, 4 of them newly answered by a request in a command's arguments
+  (`8706846f`, `21399e2e`, `51b5eb62`, `b60cab46`). The rater had classed
+  the last two as chained loads: the pickup's own words named the skill.
+- **Label rows:** 59 change. 43 are in the 89 sessions whose rows mark
+  every prompt's source as `sdk` and none's origin: their prompts and reads
+  no longer read as the user's. Of the 16 in the user's sessions, 8 dated by
+  a read nothing asked for now show `·`, 6 fall back to an earlier step, 1
+  loses a pickup's `docs` request, and 1 gains a request from a command's
+  arguments. One commit count changes (`8ae01ce4`, `review`: `+6` after a
+  read becomes a request, which counts none).
+- **Requests from a command's arguments:** 10, in 9 sessions; 1 names a
+  skill in passing deep in a long pickup (`dd806e18`, `verify`).
+- **`2e15f394`:** the rulebook read of the fourth prompt leaves; a later
+  read that a prompt asked for says it; `review-r2` says the paste.
+- **`check`:** no drift over the mini's transcripts of the last 7 days; the
+  human prompts the reader counts match the second trace, 584 and 584.
+
+### Decided by the user
+
+- **Runs and rounds take no "unasked" mark:** the reader cannot tell a stage
+  asked for in prose from one the model began, and a mark would sit mostly
+  on rounds the user asked for.
+
+### Limits
+
+- The 24 reads were classed by one rater from each prompt's opening. A read
+  asked for in words the reader does not match now leaves the steps:
+  `35b6dc54`'s only `docs` step.
+- A skill run by a skill the user typed is unasked under its own label.
+- The laptop's 23 unmarked transcripts answer no request, so their reads
+  leave the steps; they stay in the history. Their views were not rendered.
+- The views were compared, not read by the user in the popup.
+
+### The next pass
+
+Compare sessions started after this pass lands.
+
+- **Success:** no label row is dated by a read with no `→`, and every round
+  under a pasted or typed request says it.
+- **Revise the read rule** if reads asked for in words the reader misses
+  pass 2 of 24 stages, as here.
+- **Revise reading a command's arguments** if they name skills in passing
+  more often than the 1 of 10 here: a request line under a label the user
+  did not ask for.
