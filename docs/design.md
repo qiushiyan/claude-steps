@@ -55,8 +55,9 @@ Nothing persists between invocations except the notes.
   which, and what a call's output proves. The shapes envoy prints live here,
   and nothing else writes a round's fields.
 - **`internal/record/commands.go`:** which simple command is a commit, an
-  envoy run, an envoy collect or a skill's file printed, and what it names.
-  It reads an argv and no transcript row.
+  envoy run, an envoy collect, a skill's file printed, or one file printed
+  as written and alone, and what it names. It reads an argv and no
+  transcript row.
 - **`internal/shell`:** what a Bash call runs, as simple commands, each with
   its standard input, the directory it runs in, whether it runs only on a
   branch decided at run time (`Guarded`), and whether a pipe, a file or a
@@ -119,7 +120,10 @@ Nothing persists between invocations except the notes.
   (`Event.Prompt`): the prompt's own events and what the session did until
   the next one. A task notification starts a turn but no prompt, since a run
   that answers a paste often comes after the background round the paste
-  started; a slash command the user typed is a prompt.
+  started; a slash command the user typed is a prompt. A prompt the user sent
+  while the session worked, which it took mid-turn, is the user's and joins
+  the prompt in progress: it most often adds to the request under way, and
+  the work after it answers both (`docs/EVIDENCE.md`).
 - **Round:** an envoy job as the transcript shows it: a dispatch, a collect,
   or both. A collect belongs to the round its name read when its command
   ran, and takes its own block of the call's output, so a call's collects
@@ -140,6 +144,15 @@ Nothing persists between invocations except the notes.
   lists the command's skill the run is the prompt's one line, and under any
   other label that lists its key the paste is a request. A pasted prompt,
   or a paste typed as a command, is not read for the skills it names.
+- **Pointer:** drive-session's `Read <path> and do what it asks.`, typed in
+  place of a prompt too long to type, which it writes to that file. The
+  session's own read of the file, a Read or a `cat` of that file alone,
+  carries the text into the transcript, and each snippet in it is the
+  pointer's paste: dated at the pointer, under its prompt, and said `in a
+  file` among the steps, while the board's cell says `pasted`. The pointer's
+  own words ask for nothing, and the file is read for snippets alone, since a
+  file names skills in passing. A failed read, or one that gave part of the
+  file and no snippet, leaves the pointer to a later read.
 - **Request:** a paste, or a prompt that names a labelled skill; a slash
   command the user typed is a request and its run at once, and the words
   typed after it ask for the other labelled skills they name. A one-word
@@ -154,8 +167,9 @@ Nothing persists between invocations except the notes.
   only thing the steps say about asking, so a run or a round with none is
   one the reader found no request for. A failed call and a round collected
   from elsewhere carry none. The same request sent again before an answer is
-  one. A request with no known prompt (a transcript that marks none as the
-  user's) is answered by nothing.
+  one, but a paste in a file and the same paste typed come from different
+  senders, and both stand. A request with no known prompt (a transcript that
+  marks none as the user's) is answered by nothing.
 - **Step:** what happened under a label: a run or a round, with its
   prompt's request; a read that answered a request; or a request nothing
   answered; and the user's notes. A read is a step only as that answer: the
@@ -205,6 +219,19 @@ Nothing persists between invocations except the notes.
   user's. The second trace for human prompts takes any source but `sdk` and
   `system` as the user's, so a new way of marking typed prompts fails `check`
   where the steps would lose them in silence.
+- **A prompt the session takes mid-turn is an attachment.** It is a
+  `queued_command` attachment row, never a prompt row; one taken after the
+  turn ended is a prompt row whose source is `queued`. Its `humanTurn` is the
+  second trace, as `promptSource` is for a row.
+- **A pointer's file is gone by the time most views are drawn.** It sits in
+  the driver's scratchpad under `/private/tmp`, cleared at boot and left
+  behind when `claude-tomini` moves the transcript, so the reader never opens
+  it. A Read's result keeps the file as written in `toolUseResult.file`,
+  beside the numbered lines the model saw, and says which lines it covers; a
+  `cat` that is the whole call returns the file itself, unless Claude Code
+  set it aside and kept its start. The second trace for a pointer is any
+  one-line prompt that opens `Read <path>`, so a reworded pointer reads as
+  missed in `check`.
 - **The Bash tool runs zsh here, which does not split an unquoted variable.**
   `C="git commit -q"; $C -m x` runs nothing. A function defined in the call
   does run where it is called, with the call's here-document as its input.
@@ -339,6 +366,16 @@ Nothing persists between invocations except the notes.
   work was open and as a mention after the merge (`docs/EVIDENCE.md`). The
   reader would also keep a copy of TabType's rules for a project root and
   for a worktree's primary checkout.
+- **A pointer's file read from disk when the view is drawn:** the file is
+  in another session's scratchpad, so the transcript would read as a paste
+  until a reboot or a move to the mini and as nothing after, as with a
+  project's snippet file found from the session's directory.
+- **Any file a prompt names and the session reads, as a pointer:** a prompt
+  that asks for the TabType file to be read would paste every snippet in it.
+- **A prompt taken mid-turn as a prompt of its own:** a run that the
+  request under way asked for would lose its `→` (`docs/EVIDENCE.md`).
+- **A note from the driver for each send:** the pointer's sentence already
+  marks the send in the transcript, and notes are the user's.
 - **A bare date for a paste in a label's cell:** under a label that lists a
   skill it reads as the skill having run.
 - **A pasted prompt read for skill names too,** so that a label listing the
@@ -386,6 +423,12 @@ Nothing persists between invocations except the notes.
   snippet files live in the dotfiles `claude-steps` package. A binary
   refuses a key it does not know and a value of another type, so a new one
   reaches a machine with the binary that reads it, or after it.
+- **The pointer's sentence:** `Read <absolute path> and do what it asks.`,
+  which drive-session's `send-turn` types for a prompt it writes to a file.
+  This contract runs the other way: claude-steps reads it, word for word, in
+  `pointerPrompt` (`internal/record/decode.go`). drive-session writes no note
+  per send, so a binary that reads the sentence reaches a machine before the
+  skill that relies on it.
 - **`@claude_ctx_sid`:** set by the dotfiles context chip; without it the
   board is empty.
 

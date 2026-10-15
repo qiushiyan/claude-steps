@@ -114,6 +114,11 @@ What a line says:
   the same. A snippet that opens with a slash command and arrives as that
   command is the `/review  args` line and a `pasted` line at one time, and
   the paste is a step only under a label the run is not under.
+- **`pasted <key>  in a file`:** the same snippet in a file a prompt pointed
+  at: drive-session types `Read <path> and do what it asks.` for a prompt
+  too long to type. It is read from the session's own read of the file, so
+  the file need not still exist, and it is dated at that prompt. The board's
+  cell says `pasted`.
 - **`you: "…"`:** a prompt that named a labelled skill, or a slash command
   whose words named another: `/review` counts, and so does
   `skills/review/SKILL.md` or "review skill"; a hyphenated name counts as a
@@ -125,7 +130,9 @@ What a line says:
   in that prompt. A run or a round with no `→` is one no request was found
   for; a failed call and a round collected from elsewhere carry none. On a
   line of its own a request is one nothing under the label answered there;
-  the same request sent again before an answer is one. A transcript that
+  the same request sent again before an answer is one, but a paste in a
+  file and the same paste typed both stand. A prompt you send while the
+  session works is part of the prompt it is working on. A transcript that
   marks no prompt as yours answers no request, and a session a program
   started has no prompt of yours. Where the width is short the request
   gives way to what ran, and is left out before what ran is cut.
@@ -166,9 +173,10 @@ empty timeline: its steps are your notes, which outlive it. `no transcript`
 says every project directory was looked in; one that could not be is
 `transcript unreadable`, with its path, and `claude-steps check` fails. `the reader may
 have missed …` says a fact may be absent from the view: Claude Code's
-transcript format may have moved, or an envoy call took its job from a
-variable or a file and printed no `job:` line. `claude-steps check` says
-whether the misses amount to drift. On the board `!` before a title marks such
+transcript format may have moved, an envoy call took its job from a
+variable or a file and printed no `job:` line, or a prompt that asked for a
+file to be read had no read of the whole file after it. `claude-steps check`
+says whether the misses amount to drift. On the board `!` before a title marks such
 a session, and the words are in its note cell where there is room.
 
 Colour names and never grades. Each label's name has a hue; red marks an

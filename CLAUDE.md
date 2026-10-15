@@ -23,7 +23,9 @@ is what the user sees.
   `show --head`, `show --no-head`, the colour and width environment, the
   notes file, `import-notes` and the configuration keys are used by
   `~/dotfiles` (`tmux-steps.sh`, `claude-tomini`, the `claude-steps`
-  package). `docs/design.md` § Contracts other repositories depend on.
+  package), and the reader matches the pointer sentence drive-session's
+  `send-turn` types.
+  `docs/design.md` § Contracts other repositories depend on.
 - Callers run `claude-steps` from PATH. Run `make check` before shipping and
   `make install` after: a source edit alone leaves the popup on the old
   binary.
