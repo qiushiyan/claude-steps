@@ -690,7 +690,7 @@ reading the snippet from the session's own read of that file give the
 stage its `pasted` line, and what does reading a prompt the session took
 mid-turn, which the reader passed over, change in the views?
 
-**Corpus.** The laptop's 365 transcripts last changed in the 7 days to
+**Corpus.** The mini's 365 transcripts last changed in the 7 days to
 2026-10-15, each rendered with `show` at `COLUMNS=200` and with
 `show --json` by the binary built at `1fecbbf` and by this pass's, back to
 back, under the dotfiles labels of that day; `check` from both. Then three
@@ -734,6 +734,6 @@ the same Read rows behind a prompt taken mid-turn.
 
 - No transcript yet holds a snippet sent through a file; the replays stand
   in for one. The next drive is the first real case.
-- The mini's transcripts were not read.
+- The laptop's transcripts were not read.
 - A pointer read by any other command, or by a `cat` beside another
   command, is counted as missed rather than read.
