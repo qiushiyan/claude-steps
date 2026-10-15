@@ -127,12 +127,9 @@ func compileMentions(names []string) []mention {
 }
 
 // bashCall is what a Bash call ran of each fact the reader lifts from one,
-// kept until the call's result says what happened. Its events come under
-// the prompt the call was made in, which a prompt taken mid-turn may follow
-// before the result arrives.
+// kept until the call's result says what happened.
 type bashCall struct {
 	at             time.Time
-	prompt         int
 	commits        []commitCommand
 	mentionsCommit bool
 	envoy          roundCall
@@ -247,8 +244,8 @@ func (d *decoder) add(e Event) int {
 	return d.keep(e)
 }
 
-// keep records an event under the prompt it already names: what a call's
-// result settles came under the prompt the call was made in.
+// keep records an event under the prompt it already names: a pointer's
+// paste is its prompt's, however much later the read came.
 func (d *decoder) keep(e Event) int {
 	d.rec.Events = append(d.rec.Events, e)
 	return len(d.rec.Events) - 1
@@ -315,6 +312,11 @@ func (d *decoder) line(raw []byte) bool {
 // mid-turn. Claude Code records that as a queued_command attachment and
 // never as a prompt row; one taken after the turn ended is a prompt row of
 // its own. Every other kind is the harness's and is passed over.
+//
+// A prompt taken mid-turn joins the prompt in progress rather than starting
+// one: the model reads it beside the work under way, and what it does next
+// answers both. It is most often a word more on the request being worked
+// (docs/EVIDENCE.md).
 func (d *decoder) attachment(at time.Time, dated bool, r row) bool {
 	var kind struct {
 		Type string `json:"type"`
@@ -358,7 +360,9 @@ func (d *decoder) attachment(at time.Time, dated bool, r row) bool {
 		d.unexpanded(d.slash)
 		d.slash = nil
 	}
-	d.prompts++
+	if d.prompts == 0 {
+		d.prompts++
+	}
 	if strings.TrimSpace(text) != "" {
 		d.human(at, text)
 	}
@@ -427,7 +431,7 @@ func (d *decoder) assistant(at time.Time, blocks []block) bool {
 			}
 			// A Bash call that prints the file is the same read: bashCommand.
 			if m := skillFile.FindStringSubmatch(in.FilePath); m != nil {
-				d.reads[b.ID] = Event{At: at, Kind: Read, Name: m[1], Prompt: d.prompts}
+				d.reads[b.ID] = Event{At: at, Kind: Read, Name: m[1]}
 			}
 			if d.awaits(in.FilePath) {
 				d.pointed[b.ID] = in.FilePath
@@ -443,9 +447,8 @@ func (d *decoder) assistant(at time.Time, blocks []block) bool {
 // anything in it has finished, so each of its commits is guarded and nothing
 // it prints is in the result.
 func (d *decoder) bashCommand(at time.Time, command string, background bool) *bashCall {
-	call := &bashCall{at: at, prompt: d.prompts, mentionsCommit: strings.Contains(command, "commit")}
+	call := &bashCall{at: at, mentionsCommit: strings.Contains(command, "commit")}
 	call.envoy.mentions = envoyCall.MatchString(command)
-	call.envoy.prompt = d.prompts
 	// Text that does not parse yields no commands; a commit or round in it
 	// shows as a miss in the second traces.
 	cmds, _ := shell.Split(command, d.cwd)
@@ -738,7 +741,7 @@ func (d *decoder) result(at time.Time, b block, meta json.RawMessage) {
 	if read, ok := d.reads[b.ToolUseID]; ok {
 		delete(d.reads, b.ToolUseID)
 		if !b.IsError {
-			d.keep(read)
+			d.add(read)
 		}
 		return
 	}
@@ -755,7 +758,7 @@ func (d *decoder) result(at time.Time, b block, meta json.RawMessage) {
 	// Read call does, and a guarded one never counts.
 	if !b.IsError {
 		for _, name := range call.reads {
-			d.keep(Event{At: call.at, Kind: Read, Name: name, Prompt: call.prompt})
+			d.add(Event{At: call.at, Kind: Read, Name: name})
 		}
 	}
 	// A pointer's file printed by cat is the output itself, unless Claude
@@ -784,7 +787,7 @@ func (d *decoder) committed(call *bashCall, failed bool, text string) {
 	summary := gitSummary.MatchString(text)
 	for _, c := range call.commits {
 		if summary || !failed && !c.guarded {
-			d.keep(Event{At: call.at, Kind: Commit, Text: c.subject, Amend: c.amend, Dir: c.dir, Prompt: call.prompt})
+			d.add(Event{At: call.at, Kind: Commit, Text: c.subject, Amend: c.amend, Dir: c.dir})
 			d.sig.commit.Primary++
 		}
 	}

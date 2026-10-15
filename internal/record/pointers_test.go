@@ -25,7 +25,8 @@ func pointerTo(path string) string { return "Read " + path + " and do what it as
 // a file a prompt points at, and in such a file sent while the session was
 // busy. Each is the same paste under the same labels; the two in a file say
 // so, and are dated at the pointer and under its prompt, though the read came
-// after.
+// after. Sent while the session was busy, the pointer is under the prompt in
+// progress.
 func TestAPasteInAPointedFileIsThePromptsPaste(t *testing.T) {
 	typed := fixture.New()
 	typed.Prompt(strings.TrimSuffix(implementation, "\n"))
@@ -43,8 +44,11 @@ func TestAPasteInAPointedFileIsThePromptsPaste(t *testing.T) {
 		tr.SkillCall("review", "codex", "p2", false)
 		rec := load(t, tr)
 		want(t, rec, "snippet | file | review-implementation", "skill | tool | review | codex")
-		paste := rec.Events[0]
-		if !paste.At.Equal(fixture.Start.Add(time.Minute)) || paste.Prompt != 2 {
+		paste, prompt := rec.Events[0], 2
+		if queued {
+			prompt = 1
+		}
+		if !paste.At.Equal(fixture.Start.Add(time.Minute)) || paste.Prompt != prompt {
 			t.Errorf("queued %t: the paste is at %s under prompt %d, want the pointer's", queued, paste.At, paste.Prompt)
 		}
 		if got := LabelsOf(labels, paste); len(got) != 1 || got[0] != "review" {
@@ -123,8 +127,9 @@ func TestAPointerWaitsForItsFileWhole(t *testing.T) {
 }
 
 // Two pointers sent while the session was busy may both arrive before it
-// reads either. Each read answers its own pointer, under that pointer's
-// prompt; the same file sent twice is two prompts that carried one text.
+// reads either, and the same file may be sent twice. Each read answers the
+// pointers to its file, each under its own prompt, and a read of a file
+// already read whole answers nothing more.
 func TestEachPointerKeepsItsOwnPrompt(t *testing.T) {
 	second := "/tmp/driver/scratchpad/s2.md"
 	tr := fixture.New()
@@ -140,7 +145,7 @@ func TestEachPointerKeepsItsOwnPrompt(t *testing.T) {
 	for _, e := range load(t, tr).Events {
 		got = append(got, fmt.Sprintf("%s %s %d", e.Via, e.Name, e.Prompt))
 	}
-	if want := "file review-implementation 2,file app-review-verify 3,file app-review-verify 4,file app-review-verify 5"; strings.Join(got, ",") != want {
+	if want := "file review-implementation 1,file app-review-verify 1,file app-review-verify 2,file app-review-verify 3"; strings.Join(got, ",") != want {
 		t.Errorf("got  %s\nwant %s", strings.Join(got, ","), want)
 	}
 }
@@ -164,13 +169,13 @@ func TestAPasteInAFileAndOneTypedAreTwoRequests(t *testing.T) {
 }
 
 // A prompt the user typed while the session worked is taken mid-turn as an
-// attachment, and is a prompt like any other: it counts, it pastes, and it
-// names. What the harness queues itself is not the user's, and neither is a
-// subagent's.
-func TestAPromptTakenMidTurnIsAPrompt(t *testing.T) {
+// attachment. It pastes and names as any prompt does, and joins the prompt
+// in progress: what the session does next answers it and the request it was
+// already working on. What the harness queues itself is not the user's, and
+// neither is a subagent's.
+func TestAPromptTakenMidTurnJoinsThePromptInProgress(t *testing.T) {
 	tr := fixture.New()
-	tr.Prompt("start")
-	tr.SkillCall("review", "first", "p1", false)
+	tr.Prompt("make the change, then a docs pass")
 	tr.Queued("/review " + reviewVerify)
 	tr.Queued("and then use prompt-engineering")
 	tr.Attached(fixture.Row{"type": "queued_command", "prompt": "<task-notification>done</task-notification>",
@@ -181,18 +186,39 @@ func TestAPromptTakenMidTurnIsAPrompt(t *testing.T) {
 	tr.Attached(fixture.Row{"type": "queued_command", "prompt": []fixture.Row{{"type": "text", "text": "have we run pl-loopy-verify?"}, {"type": "image"}},
 		"commandMode": "prompt", "origin": fixture.Row{"kind": "human"}, "humanTurn": true})
 	tr.Attached(fixture.Row{"type": "invoked_skills", "skills": []fixture.Row{}})
+	tr.SkillCall("review", "codex", "p1", false)
+	tr.SkillCall("prompt-engineering", "", "p1", false)
+	tr.Prompt("next")
 	rec := load(t, tr)
 	var got []string
 	for _, e := range rec.Events {
 		got = append(got, fmt.Sprintf("%s %s%s %d", e.Kind, e.Name, strings.Join(e.Names, "+"), e.Prompt))
 	}
-	if want := "skill review 1,snippet app-review-verify 2,mention prompt-engineering 3,mention pl-loopy-verify 5"; strings.Join(got, ",") != want {
+	if want := "snippet app-review-verify 1,mention prompt-engineering 1,mention pl-loopy-verify 1,skill review 1,skill prompt-engineering 1"; strings.Join(got, ",") != want {
 		t.Errorf("got  %s\nwant %s", strings.Join(got, ","), want)
 	}
-	if s := signal(rec, "human prompt"); s.Primary != 4 || s.Second != 5 || s.Missed != 0 {
+	var asks []string
+	for _, st := range Steps(rec.Events, labels) {
+		ask := ""
+		if st.Ask != nil {
+			ask = string(st.Ask.Kind)
+		}
+		asks = append(asks, fmt.Sprintf("%s %s → %s", st.Event.Kind, st.Event.Name, ask))
+	}
+	if want := "snippet app-review-verify → ,mention  → ,skill review → snippet,skill prompt-engineering → mention"; strings.Join(asks, ",") != want {
+		t.Errorf("steps %s", strings.Join(asks, ","))
+	}
+	if s := signal(rec, "human prompt"); s.Primary != 5 || s.Second != 6 || s.Missed != 0 {
 		t.Errorf("human prompt: %+v", s)
 	}
 
+	// With no prompt in progress, one taken mid-turn is the first.
+	first := fixture.New()
+	first.Notification("a task finished")
+	first.Queued("run pl-loopy-verify")
+	if e := load(t, first).Events; len(e) != 1 || e[0].Prompt != 1 {
+		t.Errorf("first prompt: %+v", e)
+	}
 	// A prompt taken mid-turn that is marked the user's turn and names no
 	// human origin is one the reader may be losing.
 	drifted := fixture.New()
@@ -205,28 +231,6 @@ func TestAPromptTakenMidTurnIsAPrompt(t *testing.T) {
 	broken.Attached(fixture.Row{"type": "queued_command", "prompt": 7, "origin": fixture.Row{"kind": "human"}})
 	if rec := load(t, broken); rec.UnreadLines != 1 {
 		t.Errorf("unread lines: %d", rec.UnreadLines)
-	}
-}
-
-// A call's result can come after a prompt the session took mid-turn. What
-// the result settles, a commit, a read or a collect, came under the prompt
-// the call was made in.
-func TestWhatACallSettlesComesUnderItsOwnPrompt(t *testing.T) {
-	tr := fixture.New()
-	tr.Prompt("commit it")
-	commit := tr.BashCall(`git commit -q -m "one"`)
-	read := tr.ReadCall("/home/u/.claude/skills/review/SKILL.md")
-	collect := tr.BashCall("envoy collect review-r1")
-	tr.Queued("next")
-	tr.BashReturns(commit, "", false)
-	tr.ReadReturns(read, "/home/u/.claude/skills/review/SKILL.md", "# review", 0)
-	tr.BashReturns(collect, fmt.Sprintf(collected, "review-r1", "ok"), false)
-	var got []string
-	for _, e := range load(t, tr).Events {
-		got = append(got, fmt.Sprintf("%s %d", e.Kind, e.Prompt))
-	}
-	if want := "commit 1,read 1,round 1"; strings.Join(got, ",") != want {
-		t.Errorf("got %s, want %s", strings.Join(got, ","), want)
 	}
 }
 

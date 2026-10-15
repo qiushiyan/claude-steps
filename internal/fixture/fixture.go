@@ -225,17 +225,6 @@ func (t *Transcript) ReadFile(path, text string) *Transcript {
 	return t.ReadReturns(t.ReadCall(path), path, text, 0)
 }
 
-// BashCall is a Bash call with no result yet; BashReturns gives it one.
-func (t *Transcript) BashCall(cmd string) string {
-	return t.toolUse("Bash", Row{"command": cmd})
-}
-
-// BashReturns is a Bash call's result.
-func (t *Transcript) BashReturns(id, result string, isError bool) *Transcript {
-	t.toolResult(id, result, isError, nil)
-	return t
-}
-
 // PRLink is the row Claude Code adds when a pull request is tied to the
 // session. It repeats in real transcripts.
 func (t *Transcript) PRLink(repo string, number int) *Transcript {
