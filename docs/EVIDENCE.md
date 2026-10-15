@@ -681,3 +681,59 @@ transcripts of the last 7 days.
 
 - The count says a read was left out, not why; `show --all` lists it.
 - The views were compared, not read by the user in the popup.
+
+## 2026-10-15: a paste in a file a prompt points at
+
+**Question.** drive-session sends each snippet as a file and types only
+`Read <path> and do what it asks.`, so a driven stage had no line. Does
+reading the snippet from the session's own read of that file give the
+stage its `pasted` line, and what does reading a prompt the session took
+mid-turn, which the reader passed over, change in the views?
+
+**Corpus.** The laptop's 365 transcripts last changed in the 7 days to
+2026-10-15, each rendered with `show` at `COLUMNS=200` and with
+`show --json` by the binary built at `1fecbbf` and by this pass's, back to
+back, under the dotfiles labels of that day; `check` from both. Then three
+replays of real rows from `8513072d` and `08eb4785`, with the pointed file's
+text in the read's result swapped for the driver's notice and the `land-pr`
+snippet: a typed pointer read by Read, a typed pointer read by `cat`, and
+the same Read rows behind a prompt taken mid-turn.
+
+### Findings
+
+- **Pointers:** 8 in the week, in 6 sessions, all from one drive on
+  2026-10-14 and 15, before the driver sent snippets. Each was read 2 to 6
+  seconds after it arrived, 5 by Read and 3 by a `cat` of the file alone, and
+  each read holds the whole file. None holds a configured snippet's opening,
+  so no view on record gains a paste; `check` counts 8 pointers and 8
+  answered.
+- **Replays:** each shows `pasted land-pr  in a file` under `docs`, where
+  the binary at `1fecbbf` shows nothing. In the two with a run after the
+  read, the run carries the paste as its request.
+- **Prompts taken mid-turn:** 35 in the week, each only an attachment row.
+  `check` counts 818 human prompts where it counted 787. Read as prompts of
+  their own, they moved the prompt of a later event in 24 sessions, and 2
+  steps lost their request: `28cb452c` and `9d796358`, where the queued
+  prompt added to the request being worked. Joining the prompt in progress,
+  they move no prompt, and one view changes: `3e0859a9` gains a request
+  under `verify` that a prompt taken mid-turn made.
+- **`check`:** no drift from either binary.
+
+### Changed
+
+- **A snippet in a file a pointer names is the pointer's paste,** dated at
+  it and under its prompt, read from the session's Read of the file or its
+  `cat` of the file alone. The steps say `in a file`; the board's cell says
+  `pasted`.
+- **A prompt taken mid-turn is the user's prompt** and joins the prompt in
+  progress.
+- **`check` counts pointers** beside the one-line prompts that open
+  `Read <path>`.
+
+### Limits
+
+- No transcript yet holds a snippet sent through a file; the replays stand
+  in for one. The next drive is the first real case.
+- The mini's transcripts were not read.
+- A pointer read by any other command, or by a `cat` beside another
+  command, is counted as missed rather than read.
