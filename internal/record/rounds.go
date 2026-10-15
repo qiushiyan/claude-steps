@@ -35,6 +35,7 @@ type roundCall struct {
 	unnamed  int       // collects whose job the text does not give
 	probes   int       // `envoy collect --status-only` calls
 	mentions bool      // the text holds "envoy run" or "envoy collect" somewhere
+	prompt   int       // the human prompts read when the call was made
 }
 
 // roundOp is one envoy run, or one collect of a job the text names.
@@ -146,7 +147,7 @@ func (r *rounds) settle(call *roundCall, called, returned time.Time, failed bool
 				status = m[1]
 			}
 		}
-		r.collected(op.job, op.round, called, returned, status, failed && status == "")
+		r.collected(op.job, op.round, call.prompt, called, returned, status, failed && status == "")
 	}
 	// A collect whose job the text does not give (a loop's variable, a
 	// command substitution) is named by the collect blocks no other command
@@ -163,7 +164,7 @@ func (r *rounds) settle(call *roundCall, called, returned time.Time, failed bool
 			if idx, ok := r.latest[job]; ok {
 				round = idx
 			}
-			r.collected(job, round, called, returned, b.status, failed && b.status == "")
+			r.collected(job, round, call.prompt, called, returned, b.status, failed && b.status == "")
 		}
 		if !found {
 			r.sig.Second++
@@ -210,10 +211,10 @@ func (r *rounds) ran(op roundOp, failed bool, status string, printed bool) {
 // printed a status replaces an earlier one; one that printed none
 // (`--result-only`, or output sent to a file) leaves the status already
 // read. A job the name read no round for becomes a round of its own, dated
-// at the collect call.
-func (r *rounds) collected(job string, round int, called, returned time.Time, status string, failed bool) {
+// at the collect call and under the prompt the call was made in.
+func (r *rounds) collected(job string, round, prompt int, called, returned time.Time, status string, failed bool) {
 	if round < 0 {
-		r.rec.Events = append(r.rec.Events, Event{At: called, Kind: Round, Name: job, Prompt: *r.prompt})
+		r.rec.Events = append(r.rec.Events, Event{At: called, Kind: Round, Name: job, Prompt: prompt})
 		round = len(r.rec.Events) - 1
 		if _, ok := r.latest[job]; !ok {
 			r.latest[job] = round

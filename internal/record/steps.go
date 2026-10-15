@@ -215,8 +215,9 @@ func answers(request, e Event) bool {
 	return e.Prompt == request.Prompt || slash && e.Prompt == request.Prompt+1
 }
 
-// sameRequest reports whether two requests ask the same thing: a paste of
-// the same snippet, or the same words.
+// sameRequest reports whether two requests ask the same thing the same way:
+// a paste of the same snippet, typed or in a file, or the same words. A
+// file's paste and the user's own are two senders, so both stand.
 func sameRequest(a, b Event) bool {
-	return a.Kind == b.Kind && a.Name == b.Name && a.Text == b.Text
+	return a.Kind == b.Kind && a.Name == b.Name && a.Text == b.Text && a.Via == b.Via
 }

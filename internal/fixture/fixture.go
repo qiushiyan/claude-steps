@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -83,6 +84,20 @@ func (t *Transcript) Program(text string) *Transcript {
 func (t *Transcript) Notification(text string) *Transcript {
 	t.row("user", Row{"promptId": t.id("prompt"), "origin": Row{"kind": "task-notification"}, "promptSource": "system",
 		"message": Row{"role": "user", "content": "<task-notification>" + text + "</task-notification>"}})
+	return t
+}
+
+// Queued is a prompt the user typed while the session worked, as the session
+// took it mid-turn: an attachment, never a prompt row.
+func (t *Transcript) Queued(text string) *Transcript {
+	t.Attached(Row{"type": "queued_command", "prompt": text, "commandMode": "prompt",
+		"origin": Row{"kind": "human"}, "humanTurn": true, "delivery_id": t.id("delivery"), "source_uuid": t.id("uuid")})
+	return t
+}
+
+// Attached is an attachment row holding the given attachment.
+func (t *Transcript) Attached(attachment Row) *Transcript {
+	t.row("attachment", Row{"attachment": attachment, "parentUuid": t.id("uuid"), "entrypoint": "cli"})
 	return t
 }
 
@@ -182,6 +197,42 @@ func (t *Transcript) BashPending(cmd string) *Transcript {
 // Read is the model reading a file.
 func (t *Transcript) Read(path string, fails bool) *Transcript {
 	t.toolResult(t.toolUse("Read", Row{"file_path": path}), "1\ttext", fails, nil)
+	return t
+}
+
+// ReadCall is the model calling the Read tool, with no result yet.
+func (t *Transcript) ReadCall(path string) string {
+	return t.toolUse("Read", Row{"file_path": path})
+}
+
+// ReadReturns is a Read call's result: the model sees the lines numbered,
+// and the row keeps the file's text as written with the lines it covers.
+// total is the file's length in lines; more than the text holds is a read
+// of the file's start.
+func (t *Transcript) ReadReturns(id, path, text string, total int) *Transcript {
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	numbered := make([]string, len(lines))
+	for i, l := range lines {
+		numbered[i] = fmt.Sprintf("%d\t%s", i+1, l)
+	}
+	t.toolResult(id, strings.Join(numbered, "\n"), false, Row{"toolUseResult": Row{"type": "text",
+		"file": Row{"filePath": path, "content": text, "numLines": len(lines), "startLine": 1, "totalLines": max(total, len(lines))}}})
+	return t
+}
+
+// ReadFile is the model reading a file whole.
+func (t *Transcript) ReadFile(path, text string) *Transcript {
+	return t.ReadReturns(t.ReadCall(path), path, text, 0)
+}
+
+// BashCall is a Bash call with no result yet; BashReturns gives it one.
+func (t *Transcript) BashCall(cmd string) string {
+	return t.toolUse("Bash", Row{"command": cmd})
+}
+
+// BashReturns is a Bash call's result.
+func (t *Transcript) BashReturns(id, result string, isError bool) *Transcript {
+	t.toolResult(id, result, isError, nil)
 	return t
 }
 

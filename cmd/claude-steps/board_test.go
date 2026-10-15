@@ -148,6 +148,35 @@ func TestAPasteFromAProjectsFile(t *testing.T) {
 	lacks(t, out, "pasted")
 }
 
+// A driver that cannot type a long prompt writes it to a file and sends a
+// pointer to it, and the session reads the file. The paste the file holds is
+// the prompt's: the board's cell reads as the user's own paste does, and the
+// steps say the paste came in a file. The file itself is gone; the view
+// reads the session's read of it.
+func TestAPasteInAPointedFile(t *testing.T) {
+	w := newWorld(t)
+	const driven = "ffffffff-7777-4777-8777-777777777777"
+	file := filepath.Join(w.home, "gone", "s1.md")
+	tr := fixture.New().Title("Driven overnight")
+	tr.Prompt("Read " + file + " and do what it asks.")
+	tr.ReadFile(file, "I am away; another session sends your steps.\n\nThe step follows:\n\n"+
+		"Review the implementation against the spec, obligation by obligation, and report every gap.\n")
+	tr.Bash(`git commit -q -m "close a gap"`, "")
+	tr.Write(t, w.projects, "-work-app", driven)
+	w.panes = []panes.Pane{{ID: "%7", Where: "work:4.1", SessionID: driven}}
+
+	row := strings.Split(strings.TrimRight(w.ok("board"), "\n"), "\n")[1]
+	if got := columns.Split(row, -1)[2]; got != "pasted 3h +1" {
+		t.Errorf("review: %q in %q", got, row)
+	}
+	out := w.ok("show", "%7")
+	contains(t, out,
+		"review    3 hours ago   1 commit since   pasted review-implementation in a file",
+		"\n  review   3h   pasted review-implementation  in a file\n",
+	)
+	contains(t, w.ok("show", "%7", "--json"), `"name": "review-implementation",`+"\n"+`      "via": "file"`)
+}
+
 // The label cells never give way, and a cell that says what its event is
 // takes more room than a date. When the cells leave the title less than its
 // floor, the columns close up to one space before a row runs past the width.

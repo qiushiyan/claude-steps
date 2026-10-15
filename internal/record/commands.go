@@ -138,6 +138,22 @@ func envoyJob(argv []string, sub string) (string, bool) {
 	return "", false
 }
 
+// filePrinted returns the file a simple command prints as written, when it
+// prints one and nothing else: `cat` with that file alone. An option may
+// change the bytes (`cat -n` numbers the lines), a second file shares the
+// output, and a pipe or a file that takes the output shows the model none,
+// so none of them is that file's text. A name the text does not spell out
+// is no file.
+func filePrinted(argv []string, c shell.Command) (string, bool) {
+	if len(argv) != 2 || argv[0] != "cat" || c.Captured || c.HasStdin || strings.HasPrefix(argv[1], "-") {
+		return "", false
+	}
+	if strings.ContainsAny(argv[1], "$`*?[{") {
+		return "", false
+	}
+	return shell.Resolve(c.Dir, argv[1]), true
+}
+
 // skillsPrinted returns the skills whose file a simple command prints whole
 // into the call's output: the operands of `cat` that are a skill's file,
 // read from the directory the command runs in. That is the model loading a

@@ -25,6 +25,9 @@ func (v View) describe(e record.Event) string {
 	case record.Read:
 		return "read skills/" + e.Name + "/SKILL.md"
 	case record.Snippet:
+		if e.Via == "file" {
+			return "pasted " + e.Name + "  in a file"
+		}
 		return "pasted " + e.Name
 	case record.Mention:
 		return fmt.Sprintf("you: %q", e.Text)
@@ -257,7 +260,7 @@ func sameAsk(a, b *record.Event) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.Kind == b.Kind && a.Name == b.Name && a.Text == b.Text && a.Args == b.Args && a.At.Equal(b.At)
+	return a.Kind == b.Kind && a.Name == b.Name && a.Text == b.Text && a.Args == b.Args && a.Via == b.Via && a.At.Equal(b.At)
 }
 
 // linked names a pull request and says how the session came by it. The

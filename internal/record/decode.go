@@ -49,6 +49,13 @@ type row struct {
 	CompactMetadata struct {
 		Trigger string `json:"trigger"`
 	} `json:"compactMetadata"`
+	// ToolUseResult is what a tool returned, beside the text the model saw.
+	// Its shape differs from tool to tool, so it is decoded only where a
+	// rule reads it: a pointer's Read (pointedText).
+	ToolUseResult json.RawMessage `json:"toolUseResult"`
+	// Attachment is the harness's addition to the conversation; a prompt
+	// the session took mid-turn is one (decoder.attachment).
+	Attachment json.RawMessage `json:"attachment"`
 }
 
 type block struct {
@@ -82,6 +89,13 @@ var (
 	// Claude Code wraps text the user pasted in this tag. It is the harness's
 	// mark, not the user's words.
 	pastedTag = regexp.MustCompile(`</?pasted_content\b[^>]*>`)
+	// The one line drive-session's send-turn types in place of a prompt too
+	// long to type, which it writes to a file: the prompt is the file.
+	pointerPrompt = regexp.MustCompile(`^Read (/.+) and do what it asks\.$`)
+	// The second trace for a pointer: any one-line prompt that opens by
+	// asking for a file to be read, so a reworded send-turn reads as missed
+	// pointers rather than as nothing.
+	pointerLike = regexp.MustCompile(`^Read [/~][^\n]*$`)
 )
 
 // mention matches a prompt that names a skill without running it.
@@ -113,14 +127,29 @@ func compileMentions(names []string) []mention {
 }
 
 // bashCall is what a Bash call ran of each fact the reader lifts from one,
-// kept until the call's result says what happened.
+// kept until the call's result says what happened. Its events come under
+// the prompt the call was made in, which a prompt taken mid-turn may follow
+// before the result arrives.
 type bashCall struct {
 	at             time.Time
+	prompt         int
 	commits        []commitCommand
 	mentionsCommit bool
 	envoy          roundCall
 	createsPR      bool
 	reads          []string // the skills whose file the call prints
+	prints         string   // the one file the call prints and nothing else
+}
+
+// pointer is a prompt that asks for a file to be read and done: the file's
+// text is the prompt. The session's own read of the file carries that text
+// into the transcript, where it outlives the file.
+type pointer struct {
+	path    string
+	at      time.Time
+	prompt  int
+	keys    []string // the snippets the file's text held
+	settled bool     // a read gave the whole text, or a snippet in it
 }
 
 type slashCommand struct {
@@ -149,6 +178,8 @@ type decoder struct {
 	cwd        string
 	skillCalls map[string]int       // Skill tool call id → its event
 	reads      map[string]Event     // Read call id → the skill file it read
+	pointed    map[string]string    // Read call id → the pointer's file it read
+	pointers   []*pointer           // the pointer prompts, in order
 	bash       map[string]*bashCall // Bash tool call id → what it ran
 	rounds     rounds               // the envoy rounds, joined in rounds.go
 	prs        map[string]int       // pull request URL → its event
@@ -158,7 +189,7 @@ type decoder struct {
 	prompts    int                  // the human prompts read so far
 	unsourced  []prompt             // prompts with no origin, used when no row is marked
 
-	sig struct{ slash, tool, pr, compaction, human, commit, round Signal }
+	sig struct{ slash, tool, pr, compaction, human, pointer, commit, round Signal }
 }
 
 func newDecoder(rec *Record, snippets config.Snippets, mentions []mention) *decoder {
@@ -173,6 +204,7 @@ func newDecoder(rec *Record, snippets config.Snippets, mentions []mention) *deco
 		rec:        rec,
 		skillCalls: map[string]int{},
 		reads:      map[string]Event{},
+		pointed:    map[string]string{},
 		bash:       map[string]*bashCall{},
 		prs:        map[string]int{},
 		created:    map[string]time.Time{},
@@ -209,8 +241,15 @@ func (d *decoder) read(r io.Reader) error {
 	}
 }
 
+// add records an event under the prompt read last.
 func (d *decoder) add(e Event) int {
 	e.Prompt = d.prompts
+	return d.keep(e)
+}
+
+// keep records an event under the prompt it already names: what a call's
+// result settles came under the prompt the call was made in.
+func (d *decoder) keep(e Event) int {
 	d.rec.Events = append(d.rec.Events, e)
 	return len(d.rec.Events) - 1
 }
@@ -239,6 +278,8 @@ func (d *decoder) line(raw []byte) bool {
 			d.add(Event{At: at, Kind: Compaction, Trigger: r.CompactMetadata.Trigger})
 			d.sig.compaction.Primary++
 		}
+	case "attachment":
+		return d.attachment(at, err == nil, r)
 	case "user", "assistant":
 		// A conversation row with no time cannot be placed in a timeline.
 		if err != nil {
@@ -265,6 +306,61 @@ func (d *decoder) line(raw []byte) bool {
 		} else {
 			d.user(at, r, text, blocks)
 		}
+	}
+	return true
+}
+
+// attachment reads what the harness added to the conversation. One kind is
+// the user's: a prompt typed while the session worked, which it took
+// mid-turn. Claude Code records that as a queued_command attachment and
+// never as a prompt row; one taken after the turn ended is a prompt row of
+// its own. Every other kind is the harness's and is passed over.
+func (d *decoder) attachment(at time.Time, dated bool, r row) bool {
+	var kind struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(r.Attachment, &kind) != nil || kind.Type != "queued_command" {
+		return true
+	}
+	var a struct {
+		Prompt json.RawMessage `json:"prompt"`
+		Origin *struct {
+			Kind string `json:"kind"`
+		} `json:"origin"`
+		HumanTurn bool `json:"humanTurn"`
+	}
+	if json.Unmarshal(r.Attachment, &a) != nil || !dated {
+		return false
+	}
+	text, _, ok := content(a.Prompt)
+	if !ok {
+		return false
+	}
+	if r.IsSidechain {
+		return true
+	}
+	human := a.Origin != nil && a.Origin.Kind == "human"
+	// humanTurn is the second trace, as promptSource is for a prompt row.
+	if a.HumanTurn {
+		d.sig.human.Second++
+		if !human {
+			d.sig.human.Missed++
+		}
+	}
+	if !human {
+		return true
+	}
+	d.marked = true
+	d.lastAt, d.rec.LastAt = at, at
+	// A command still waiting for its expansion has none: this prompt came
+	// next.
+	if d.slash != nil {
+		d.unexpanded(d.slash)
+		d.slash = nil
+	}
+	d.prompts++
+	if strings.TrimSpace(text) != "" {
+		d.human(at, text)
 	}
 	return true
 }
@@ -331,7 +427,10 @@ func (d *decoder) assistant(at time.Time, blocks []block) bool {
 			}
 			// A Bash call that prints the file is the same read: bashCommand.
 			if m := skillFile.FindStringSubmatch(in.FilePath); m != nil {
-				d.reads[b.ID] = Event{At: at, Kind: Read, Name: m[1]}
+				d.reads[b.ID] = Event{At: at, Kind: Read, Name: m[1], Prompt: d.prompts}
+			}
+			if d.awaits(in.FilePath) {
+				d.pointed[b.ID] = in.FilePath
 			}
 		}
 	}
@@ -344,11 +443,19 @@ func (d *decoder) assistant(at time.Time, blocks []block) bool {
 // anything in it has finished, so each of its commits is guarded and nothing
 // it prints is in the result.
 func (d *decoder) bashCommand(at time.Time, command string, background bool) *bashCall {
-	call := &bashCall{at: at, mentionsCommit: strings.Contains(command, "commit")}
+	call := &bashCall{at: at, prompt: d.prompts, mentionsCommit: strings.Contains(command, "commit")}
 	call.envoy.mentions = envoyCall.MatchString(command)
+	call.envoy.prompt = d.prompts
 	// Text that does not parse yields no commands; a commit or round in it
 	// shows as a miss in the second traces.
 	cmds, _ := shell.Split(command, d.cwd)
+	// A call's output is one file's text only when printing it is all the
+	// call does.
+	if len(cmds) == 1 && !cmds[0].Guarded && !background {
+		if path, ok := filePrinted(cmds[0].Argv(), cmds[0]); ok && d.awaits(path) {
+			call.prints = path
+		}
+	}
 	for _, c := range cmds {
 		argv := c.Argv()
 		if commit, ok := commitOf(argv, c); ok {
@@ -377,16 +484,26 @@ func (d *decoder) user(at time.Time, r row, text string, blocks []block) {
 	if r.Origin != nil || r.PromptSource != "" {
 		d.marked = true
 	}
-	results := false
+	results := 0
 	for _, b := range blocks {
 		if b.Type == "tool_result" {
-			results = true
-			d.result(at, b)
+			results++
+		}
+	}
+	for _, b := range blocks {
+		if b.Type == "tool_result" {
+			// The row's own record of what the tool returned belongs to its
+			// one result; beside several it names none of them.
+			var meta json.RawMessage
+			if results == 1 {
+				meta = r.ToolUseResult
+			}
+			d.result(at, b, meta)
 		}
 	}
 	waiting := d.slash
 	d.slash = nil
-	if results {
+	if results > 0 {
 		// Only the row right after a command can be its expansion.
 		if waiting != nil {
 			d.unexpanded(waiting)
@@ -464,8 +581,7 @@ func (d *decoder) user(at time.Time, r row, text string, blocks []block) {
 		}
 		switch {
 		case human:
-			d.sig.human.Primary++
-			d.prompt(at, text)
+			d.human(at, text)
 		case r.Origin == nil:
 			d.unsourced = append(d.unsourced, prompt{at, text})
 		}
@@ -526,6 +642,71 @@ func (d *decoder) named(text string) []string {
 	return names
 }
 
+// human lifts what a prompt the user sent shows, typed or taken mid-turn. A
+// pointer's words are the sender's sentence and a path, so they ask for
+// nothing; its file's text is read when the session reads the file.
+func (d *decoder) human(at time.Time, text string) {
+	d.sig.human.Primary++
+	t := strings.TrimSpace(text)
+	if pointerLike.MatchString(t) {
+		d.sig.pointer.Second++
+	}
+	if m := pointerPrompt.FindStringSubmatch(t); m != nil {
+		d.pointers = append(d.pointers, &pointer{path: m[1], at: at, prompt: d.prompts})
+		return
+	}
+	d.prompt(at, text)
+}
+
+// awaits reports whether a pointer's file has yet to be read whole.
+func (d *decoder) awaits(path string) bool {
+	return slices.ContainsFunc(d.pointers, func(p *pointer) bool { return p.path == path && !p.settled })
+}
+
+// readPointed matches a read of a pointer's file against the snippets. Each
+// snippet the text holds is a paste dated at the pointer and under its
+// prompt, however much later the read came; the same path sent twice before
+// a read is two prompts that carried the same text. A read that gave part
+// of the file and no snippet leaves the pointer to a later read.
+func (d *decoder) readPointed(path, text string, whole bool) {
+	keys := d.snippets.Pasted(text)
+	for _, p := range d.pointers {
+		if p.path != path || p.settled {
+			continue
+		}
+		for _, key := range keys {
+			if !slices.Contains(p.keys, key) {
+				p.keys = append(p.keys, key)
+				d.keep(Event{At: p.at, Kind: Snippet, Name: key, Via: "file", Prompt: p.prompt})
+			}
+		}
+		if whole || len(p.keys) > 0 {
+			p.settled = true
+			d.sig.pointer.Primary++
+		}
+	}
+}
+
+// pointedText is the text a Read returned of a pointer's file, and whether
+// it is the whole file. The model sees the lines numbered; the result's own
+// record of the file holds them as written.
+func pointedText(meta json.RawMessage, path string) (text string, whole, ok bool) {
+	var r struct {
+		File *struct {
+			FilePath   string `json:"filePath"`
+			Content    string `json:"content"`
+			NumLines   int    `json:"numLines"`
+			StartLine  int    `json:"startLine"`
+			TotalLines int    `json:"totalLines"`
+		} `json:"file"`
+	}
+	if json.Unmarshal(meta, &r) != nil || r.File == nil || r.File.FilePath != path {
+		return "", false, false
+	}
+	f := r.File
+	return f.Content, f.StartLine <= 1 && f.NumLines >= f.TotalLines, true
+}
+
 // prompt lifts what a human prompt shows: a pasted snippet, or failing that
 // the labelled skills it names.
 func (d *decoder) prompt(at time.Time, text string) {
@@ -541,17 +722,23 @@ func (d *decoder) prompt(at time.Time, text string) {
 	}
 }
 
-func (d *decoder) result(at time.Time, b block) {
+func (d *decoder) result(at time.Time, b block, meta json.RawMessage) {
 	if idx, ok := d.skillCalls[b.ToolUseID]; ok {
 		if b.IsError {
 			d.rec.Events[idx].Failed = true
 		}
 		return
 	}
+	if path, ok := d.pointed[b.ToolUseID]; ok {
+		delete(d.pointed, b.ToolUseID)
+		if text, whole, ok := pointedText(meta, path); ok && !b.IsError {
+			d.readPointed(path, text, whole)
+		}
+	}
 	if read, ok := d.reads[b.ToolUseID]; ok {
 		delete(d.reads, b.ToolUseID)
 		if !b.IsError {
-			d.add(read)
+			d.keep(read)
 		}
 		return
 	}
@@ -568,8 +755,13 @@ func (d *decoder) result(at time.Time, b block) {
 	// Read call does, and a guarded one never counts.
 	if !b.IsError {
 		for _, name := range call.reads {
-			d.add(Event{At: call.at, Kind: Read, Name: name})
+			d.keep(Event{At: call.at, Kind: Read, Name: name, Prompt: call.prompt})
 		}
+	}
+	// A pointer's file printed by cat is the output itself, unless Claude
+	// Code set it aside and kept only its start.
+	if call.prints != "" && !b.IsError {
+		d.readPointed(call.prints, text, !strings.HasPrefix(strings.TrimSpace(text), "<persisted-output>"))
 	}
 	d.committed(call, b.IsError, text)
 	d.rounds.settle(&call.envoy, call.at, at, b.IsError, text)
@@ -592,7 +784,7 @@ func (d *decoder) committed(call *bashCall, failed bool, text string) {
 	summary := gitSummary.MatchString(text)
 	for _, c := range call.commits {
 		if summary || !failed && !c.guarded {
-			d.add(Event{At: call.at, Kind: Commit, Text: c.subject, Amend: c.amend, Dir: c.dir})
+			d.keep(Event{At: call.at, Kind: Commit, Text: c.subject, Amend: c.amend, Dir: c.dir, Prompt: call.prompt})
 			d.sig.commit.Primary++
 		}
 	}
@@ -641,12 +833,16 @@ func (d *decoder) finish() {
 	if extra := d.sig.compaction.Second - d.sig.compaction.Primary; extra > 0 {
 		d.sig.compaction.Missed = extra
 	}
+	// A pointer no read gave whole, and a prompt worded like one that the
+	// reader did not take for one, may each have carried a paste.
+	d.sig.pointer.Missed = d.sig.pointer.Second - d.sig.pointer.Primary
 	slices.SortStableFunc(d.rec.Events, func(a, b Event) int { return a.At.Compare(b.At) })
 
 	d.rec.Signals = []Signal{
 		d.sig.slash.as("skill, typed", "a slash command followed by its expansion / an expansion row with no tool call behind it"),
 		d.sig.tool.as("skill, model call", "a Skill tool call / an expansion row that names a tool call"),
-		d.sig.human.as("human prompt", "a prompt row with origin human / a row whose source is neither sdk nor system"),
+		d.sig.human.as("human prompt", "a prompt row or a prompt taken mid-turn with origin human / a row whose source is neither sdk nor system, or a prompt taken mid-turn marked as the user's turn"),
+		d.sig.pointer.as("file pointer", "a pointer prompt a read of its file answered / a one-line prompt that opens \"Read <path>\""),
 		d.sig.round.as("envoy round", "an envoy run or collect in command position / a result of an envoy call holding its job and status lines, or a call whose job neither its text nor its result names"),
 		d.sig.commit.as("commit", "a git commit in command position / a result holding git's commit summary line"),
 		d.sig.pr.as("pull request", "a pull-request link row / a URL returned by gh pr create"),

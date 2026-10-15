@@ -51,7 +51,8 @@ type Event struct {
 	// Args are the words that followed a skill invocation.
 	Args string `json:"args,omitempty"`
 	// Via tells a slash command the user typed ("slash") from a Skill call
-	// the model made ("tool").
+	// the model made ("tool"), and a paste in a file a prompt pointed at
+	// ("file") from one in the prompt itself.
 	Via string `json:"via,omitempty"`
 	// Command is the skill a pasted snippet ran by arriving as a slash
 	// command, or the skill a mention's words were typed as the arguments of:
