@@ -1,0 +1,78 @@
+Usage: claude-steps board [flags]
+
+Print a row for each Claude session running in tmux.
+
+One row per tmux pane that runs a Claude session: the pane, the session's
+title, a cell per label, the latest pull request, and your latest note after
+the number of notes in parentheses, "(2) skip verify". A pane is found by
+its @claude_ctx_sid pane option, which holds the session id: the dotfiles
+context chip sets it, and "tmux set-option -p -t %12 @claude_ctx_sid <id>"
+sets it by hand. A session in a pane without it is left off, and
+"claude-steps show <session id>" still reads it.
+
+--ids is for a picker: the two ids lead every line, are empty on the header
+line, and are never coloured. --brief prints no header line. --json gives
+every time in RFC 3339, never relative.
+
+A label's cell says when its latest step happened, never how it went. It
+reads "[read|pasted] <age> [+N]", "named <age>", or "·":
+
+  <age>    how long ago the label's latest step happened: now, or a number
+           of s, m, h, d, w, mo or y ("11m", "2d"). Alone, the step ran: a
+           skill loaded or an envoy round dispatched, timed from its dispatch
+  +N       the commits the session made since that step started ("2h +1",
+           "16m +0"), on a label that counts them and never on one that
+           does not
+  read     that step was a skill's file read in answer to a request, not a
+           load of the skill
+  pasted   that step was a pasted snippet, a request nothing under the
+           label has answered
+  named    nothing is under the label but a prompt that named the skill
+  ·        the label has no step in the session
+
+"!" before a title says the transcript was read with something missing, and
+the note cell says what, in square brackets, where there is room; show says
+it in full. A session whose transcript is gone or unreadable says so in
+place of its cells. With no Claude pane, --json prints [] and the text board
+prints nothing and says so on stderr; both exit 0.
+
+Flags:
+      --json     Print a JSON array holding each session as show --json prints it.
+      --ids      Start every line with the pane id and the full session id, each followed by a tab.
+      --brief    Print each session as its pane, the age of its last message and its title.
+
+Inherited flags:
+  -h, --help     Show context-sensitive help.
+
+Constraints:
+  At most one of --json, --brief.
+
+Files:
+  ~/.config/claude-steps/config.toml
+      Under $XDG_CONFIG_HOME when that is set. Each [[label]] table is a stage:
+      its name; the skills, snippets (keys of TabType snippets, prompts kept
+      in a file to paste whole) and jobs (envoy job-name prefixes) that count
+      as it; count_commits, to count the commits
+      made since its latest step; and color. The projects_dir key moves the
+      transcripts, and the snippets key lists the TabType files. With no file
+      there are no labels, and a session view prints its full history.
+  ~/.claude/projects/
+      The transcripts, opened read-only. A subagent's own transcript is not
+      read.
+  ~/.local/state/claude-steps/notes/<session id>.jsonl
+      Your notes, one JSON note per line; under $XDG_STATE_HOME when that is
+      set. They are the only files written: nothing reaches a session, no key
+      is sent to its pane, and no model is called.
+
+Output:
+  Colour is drawn on a terminal, or through a pipe when CLICOLOR_FORCE is set
+  to anything but 0, and never when NO_COLOR is set; plain output carries no
+  escape codes. A hue names a label, red marks an error the transcript
+  reports or something the reader could not read, bold marks a count of
+  commits that is not zero, and no colour grades a date. COLUMNS, when set,
+  is the width the output fits; without it, long text is cut at fixed widths.
+
+Exit codes:
+  0    success
+  1    failed
+  2    invalid arguments; nothing was run

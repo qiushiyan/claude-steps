@@ -1,0 +1,27 @@
+[1mThe calendar walks days once[0m   [2maaaaaaaa[0m   [36m [0mwork:1.1
+[34m [0m[34m/work/app[0m   [35m [0m[35mfeat/thing[0m   [2m [0m1 compaction, last 2 hours ago
+[2m [0mlast message 12 minutes ago
+[32m [0m[32mPR #7145 opened here[0m  https://github.com/acme/app/pull/7145
+[2m──────────────────────────────────────────────────────────────────────────────────────────[0m
+[34mreview[0m    2 hours ago      [1m1 commit since[0m    review-r2 envoy said partial
+[35mverify[0m    16 minutes ago   0 commits since   skill pl-loopy-verify local spikes
+[36mprompts[0m   13 minutes ago                     read skills/prompt-engineering/SKILL.md
+
+[2mnotes[0m   now            a second note
+        1 minute ago   --a note that reads like an option
+
+[2mhistory · newest first[0m
+  [2mnote[0m      now   a second note
+  [2mnote[0m      1m    --a note that reads like an option
+  [36mprompts[0m   13m   read skills/prompt-engineering/SKILL.md
+  [35mverify[0m    16m   skill pl-loopy-verify  local spikes
+  [36mprompts[0m   17m   you: "then hold the new prompts to prompt-engineering"
+            2h    PR #7145 opened here  acme/app
+            2h    commit  docs: the stories on the local rig
+            2h    [2mcompaction (manual)[0m
+  [34mreview[0m    2h    review-r2  collected, envoy said partial
+  [34mreview[0m    2h    review-r2  dispatched
+  [34mreview[0m    3h    review-r1  collected
+            3h    commit  the calendar walks days once (review r1)
+  [34mreview[0m    3h    review-r1  dispatched
+  [34mreview[0m    3h    /review  codex full review

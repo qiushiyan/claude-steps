@@ -1,0 +1,14 @@
+app   eeeeeeee   work:3.1
+/work/app   feat/thing   last message 3 hours ago
+1 line could not be read
+────────────────────────────────────────────────────────────────────────
+review    3 hours ago   0 commits since   /review
+verify    ·
+prompts   ·
+
+notes   none
+
+steps · newest first
+  review   3h   /review
+
+1 row in the full history (show --all)

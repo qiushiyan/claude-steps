@@ -1,0 +1,10 @@
+  [2mnote[0m      now   a second note
+  [2mnote[0m      1m    --a note that reads like an option
+  [36mprompts[0m   13m   you: "then hold the new prompts to pro…" → read skills/prompt-engineeri…
+  [35mverify[0m    16m   skill pl-loopy-verify  local spikes
+                  1 commit
+  [34mreview[0m    2h    /review codex full review → review-r2  envoy said partial
+                  1 commit
+  [34mreview[0m    3h    /review codex full review → review-r1
+
+[2m14 rows in the full history (show --all)[0m

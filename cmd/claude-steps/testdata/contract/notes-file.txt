@@ -1,0 +1,2 @@
+{"at":"2026-10-01T12:30:00Z","text":"--a note that reads like an option"}
+{"at":"2026-10-01T12:31:00Z","text":"a second note"}

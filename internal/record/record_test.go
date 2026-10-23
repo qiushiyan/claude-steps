@@ -491,7 +491,7 @@ func TestASkillFilePrintedByCatIsARead(t *testing.T) {
 			got = append(got, string(e.Kind)+" "+e.Name)
 		}
 		expected := []string{}
-		for _, name := range strings.Fields(want) {
+		for name := range strings.FieldsSeq(want) {
 			expected = append(expected, "read "+name)
 		}
 		if strings.Join(got, ", ") != strings.Join(expected, ", ") {

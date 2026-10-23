@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +8,6 @@ import (
 	"time"
 
 	"github.com/qiushiyan/claude-steps/internal/fixture"
-	"github.com/qiushiyan/claude-steps/internal/panes"
 )
 
 // Notes: obligations 11 and 12, and the session a note lands in.
@@ -89,12 +87,11 @@ func TestLiveSessionWithNoTranscriptTakesANote(t *testing.T) {
 func TestImportNotes(t *testing.T) {
 	w := newWorld(t)
 	w.ok("note", worked, "written here")
-	var out, errb bytes.Buffer
-	a := &app{stdin: strings.NewReader(`{"at":"2026-10-01T09:00:00Z","text":"from the laptop"}` + "\n"), stdout: &out, stderr: &errb,
-		now: func() time.Time { return w.now }, panes: func() ([]panes.Pane, error) { return w.panes, nil }, getenv: func(string) string { return "" }}
-	if code := a.run([]string{"import-notes", worked}); code != 0 || out.String() != "1 notes added\n" {
-		t.Fatalf("exit %d, %q, %q", code, out.String(), errb.String())
+	w.stdin = `{"at":"2026-10-01T09:00:00Z","text":"from the laptop"}` + "\n"
+	if out, errb, code := w.run("import-notes", worked); code != 0 || out != "1 notes added\n" {
+		t.Fatalf("exit %d, %q, %q", code, out, errb)
 	}
+	w.stdin = ""
 	contains(t, w.ok("show", worked), "notes   now           written here\n        3 hours ago   from the laptop\n")
 	if _, _, code := w.run("import-notes", "aaaaaaaa"); code == 0 {
 		t.Error("import-notes takes a full session id")

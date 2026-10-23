@@ -1,9 +1,14 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/qiushiyan/clikit/clikittest"
 
 	"github.com/qiushiyan/claude-steps/internal/fixture"
 	"github.com/qiushiyan/claude-steps/internal/panes"
@@ -17,8 +22,9 @@ func TestHelpNeedsNoConfiguration(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "claude-steps show") {
 		t.Errorf("show --help with a broken configuration: exit %d, %q, %q", code, out, errb)
 	}
-	// The usage names every option the popup relies on.
-	contains(t, out, "--head", "--no-head", "--brief", "--ids", "--all")
+	// Each command's page names the options the popup relies on.
+	contains(t, out, "--head", "--no-head", "--all")
+	contains(t, w.ok("board", "--help"), "--brief", "--ids")
 	if _, errb, code := w.run("show", "%1"); code == 0 || !strings.Contains(errb, "skils") {
 		t.Errorf("a broken configuration was not reported: exit %d, %q", code, errb)
 	}
@@ -53,10 +59,52 @@ func TestWithoutTmuxOrASession(t *testing.T) {
 	if out, errb, code := w.run("board"); code != 0 || out != "" || !strings.Contains(errb, "no tmux pane runs a Claude session") {
 		t.Errorf("board with no Claude pane: exit %d, %q, %q", code, out, errb)
 	}
+	if out, errb, code := w.run("board", "--json"); code != 0 || out != "[]\n" || errb != "" {
+		t.Errorf("board --json with no Claude pane: exit %d, %q, %q", code, out, errb)
+	}
 	if out, _, code := w.run("--help"); code != 0 || !strings.Contains(out, "/clear") || !strings.Contains(out, "forked session") {
 		t.Errorf("--help should say what starts a new session id:\n%s", out)
 	}
 	if _, _, code := w.run("frobnicate"); code != 2 {
 		t.Errorf("unknown command: exit %d", code)
+	}
+}
+
+// Every help page, as an agent reads it. make golden rewrites them.
+func TestHelpPages(t *testing.T) {
+	newWorld(t) // a temporary home, so a page that ran a command would touch nothing real
+	clikittest.Golden(t, app, "testdata/help")
+}
+
+// A mistake in the arguments exits 2 with the command's synopsis, and runs
+// nothing: no note is written and nothing is printed on stdout.
+func TestUsageErrors(t *testing.T) {
+	w := newWorld(t)
+	for _, args := range [][]string{
+		{},
+		{"frobnicate"},
+		{"show"}, // outside tmux, with no session
+		{"show", "%1", "%2"},
+		{"show", "%1", "--head", "--no-head"},
+		{"show", "%1", "--json", "--head"},
+		{"show", "%1", "--json", "--no-head"},
+		{"show", "%1", "--brief"},
+		{"board", "%1"},
+		{"board", "--json", "--brief"},
+		{"note"},
+		{"note", "%1"},
+		{"note", "%1", "  "},
+		{"note", "%1", "--to-session", "text"},
+		{"check", "now"},
+		{"import-notes"},
+		{"import-notes", "aaaaaaaa"},
+	} {
+		out, errb, code := w.run(args...)
+		if code != 2 || out != "" || !strings.Contains(errb, "Usage: claude-steps") {
+			t.Errorf("claude-steps %q: exit %d, stdout %q, stderr %q", args, code, out, errb)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(w.state, "notes")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a refused command wrote notes: %v", err)
 	}
 }

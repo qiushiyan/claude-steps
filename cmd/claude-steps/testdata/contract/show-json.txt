@@ -1,0 +1,156 @@
+{
+  "pane": "%1",
+  "where": "work:1.1",
+  "id": "aaaaaaaa-1111-4111-8111-111111111111",
+  "path": "$HOME/.claude/projects/-work-app/aaaaaaaa-1111-4111-8111-111111111111.jsonl",
+  "title": "The calendar walks days once",
+  "cwd": "/work/app",
+  "branch": "feat/thing",
+  "last_at": "2026-10-01T12:19:00Z",
+  "status": "ok",
+  "unread_lines": 0,
+  "events": [
+    {
+      "at": "2026-10-01T09:00:00Z",
+      "kind": "skill",
+      "prompt": 1,
+      "name": "review",
+      "args": "codex full review",
+      "via": "slash"
+    },
+    {
+      "at": "2026-10-01T09:02:00Z",
+      "kind": "round",
+      "prompt": 1,
+      "name": "review-r1",
+      "dispatched": true,
+      "collected_at": "2026-10-01T09:07:00Z",
+      "outcome": "ok"
+    },
+    {
+      "at": "2026-10-01T09:04:00Z",
+      "kind": "commit",
+      "prompt": 1,
+      "text": "the calendar walks days once (review r1)"
+    },
+    {
+      "at": "2026-10-01T10:00:00Z",
+      "kind": "round",
+      "prompt": 1,
+      "name": "review-r2",
+      "dispatched": true,
+      "collected_at": "2026-10-01T10:03:00Z",
+      "outcome": "partial"
+    },
+    {
+      "at": "2026-10-01T10:04:00Z",
+      "kind": "compaction",
+      "prompt": 1,
+      "trigger": "manual"
+    },
+    {
+      "at": "2026-10-01T10:07:00Z",
+      "kind": "commit",
+      "prompt": 1,
+      "text": "docs: the stories on the local rig"
+    },
+    {
+      "at": "2026-10-01T10:11:00Z",
+      "kind": "pr",
+      "prompt": 1,
+      "repo": "acme/app",
+      "number": 7145,
+      "url": "https://github.com/acme/app/pull/7145",
+      "opened_here": true
+    },
+    {
+      "at": "2026-10-01T12:14:00Z",
+      "kind": "mention",
+      "prompt": 2,
+      "names": [
+        "prompt-engineering"
+      ],
+      "text": "then hold the new prompts to prompt-engineering"
+    },
+    {
+      "at": "2026-10-01T12:15:00Z",
+      "kind": "skill",
+      "prompt": 2,
+      "name": "pl-loopy-verify",
+      "args": "local spikes",
+      "via": "tool"
+    },
+    {
+      "at": "2026-10-01T12:18:00Z",
+      "kind": "read",
+      "prompt": 2,
+      "name": "prompt-engineering"
+    }
+  ],
+  "notes": [
+    {
+      "at": "2026-10-01T12:30:00Z",
+      "text": "--a note that reads like an option"
+    },
+    {
+      "at": "2026-10-01T12:31:00Z",
+      "text": "a second note"
+    }
+  ],
+  "unread_notes": 0,
+  "pull_requests": [
+    {
+      "at": "2026-10-01T10:11:00Z",
+      "kind": "pr",
+      "prompt": 1,
+      "repo": "acme/app",
+      "number": 7145,
+      "url": "https://github.com/acme/app/pull/7145",
+      "opened_here": true
+    }
+  ],
+  "compactions": [
+    {
+      "at": "2026-10-01T10:04:00Z",
+      "kind": "compaction",
+      "prompt": 1,
+      "trigger": "manual"
+    }
+  ],
+  "labels": [
+    {
+      "name": "review",
+      "latest": {
+        "at": "2026-10-01T10:00:00Z",
+        "kind": "round",
+        "prompt": 1,
+        "name": "review-r2",
+        "dispatched": true,
+        "collected_at": "2026-10-01T10:03:00Z",
+        "outcome": "partial"
+      },
+      "commits_since": 1
+    },
+    {
+      "name": "verify",
+      "latest": {
+        "at": "2026-10-01T12:15:00Z",
+        "kind": "skill",
+        "prompt": 2,
+        "name": "pl-loopy-verify",
+        "args": "local spikes",
+        "via": "tool"
+      },
+      "commits_since": 0
+    },
+    {
+      "name": "prompts",
+      "latest": {
+        "at": "2026-10-01T12:18:00Z",
+        "kind": "read",
+        "prompt": 2,
+        "name": "prompt-engineering"
+      }
+    }
+  ]
+}

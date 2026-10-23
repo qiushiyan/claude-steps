@@ -1,17 +1,20 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
+	"io"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alecthomas/kong"
 	"github.com/mattn/go-runewidth"
 	"github.com/qiushiyan/claude-steps/internal/fixture"
 	"github.com/qiushiyan/claude-steps/internal/panes"
+	"github.com/qiushiyan/clikit/clikittest"
 )
 
 const (
@@ -64,6 +67,7 @@ type world struct {
 	tmuxPane string
 	env      map[string]string // COLUMNS, NO_COLOR, CLICOLOR_FORCE
 	tty      bool              // stdout is a terminal
+	stdin    string
 }
 
 func newWorld(t *testing.T) *world {
@@ -113,19 +117,23 @@ func newWorld(t *testing.T) *world {
 	return w
 }
 
+// run invokes the App as main does, with the world's clock, panes and
+// terminal bound over the real ones and its environment set.
 func (w *world) run(args ...string) (stdout, stderr string, code int) {
 	w.t.Helper()
-	var out, errb bytes.Buffer
-	a := &app{stdout: &out, stderr: &errb, tty: w.tty, now: func() time.Time { return w.now },
-		panes: func() ([]panes.Pane, error) { return w.panes, w.panesErr },
-		getenv: func(k string) string {
-			if k == "TMUX_PANE" {
-				return w.tmuxPane
-			}
-			return w.env[k]
-		}}
-	code = a.run(args)
-	return out.String(), errb.String(), code
+	for _, k := range []string{"COLUMNS", "NO_COLOR", "CLICOLOR_FORCE"} {
+		w.t.Setenv(k, w.env[k])
+	}
+	w.t.Setenv("TMUX_PANE", w.tmuxPane)
+	a := app
+	a.Stdin = strings.NewReader(w.stdin)
+	a.Options = append(slices.Clone(app.Options), kong.Bind(host{
+		now:      func() time.Time { return w.now },
+		panes:    func() ([]panes.Pane, error) { return w.panes, w.panesErr },
+		terminal: func(io.Writer) bool { return w.tty },
+	}))
+	r := clikittest.Run(a, args...)
+	return r.Stdout, r.Stderr, r.Code
 }
 
 func (w *world) ok(args ...string) string {

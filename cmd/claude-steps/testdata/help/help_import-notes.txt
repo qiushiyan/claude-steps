@@ -1,0 +1,40 @@
+Usage: claude-steps import-notes <session-id>
+
+Merge the notes another machine kept for a session, read on stdin.
+
+Stdin is the notes file the other machine keeps for the session, one JSON
+note per line ({"at":"<RFC 3339 time>","text":"…"}). The notes this machine
+lacks are appended and counted on stdout ("2 notes added"); a note with the
+same time and text as one already here is skipped, so importing the same
+file twice prints "0 notes added" the second time. A note removed here by
+hand comes back if the file still holds it. The transcript need not be on this machine yet. A
+line that is not a note is skipped, and the command exits 1 once the rest
+are added.
+
+Arguments:
+  <session-id>    The session's full id, as board --ids and show --json print it; a prefix is refused, as this machine may hold nothing yet to match it.
+
+Inherited flags:
+  -h, --help      Show context-sensitive help.
+
+Files:
+  ~/.config/claude-steps/config.toml
+      Under $XDG_CONFIG_HOME when that is set. Each [[label]] table is a stage:
+      its name; the skills, snippets (keys of TabType snippets, prompts kept
+      in a file to paste whole) and jobs (envoy job-name prefixes) that count
+      as it; count_commits, to count the commits
+      made since its latest step; and color. The projects_dir key moves the
+      transcripts, and the snippets key lists the TabType files. With no file
+      there are no labels, and a session view prints its full history.
+  ~/.claude/projects/
+      The transcripts, opened read-only. A subagent's own transcript is not
+      read.
+  ~/.local/state/claude-steps/notes/<session id>.jsonl
+      Your notes, one JSON note per line; under $XDG_STATE_HOME when that is
+      set. They are the only files written: nothing reaches a session, no key
+      is sent to its pane, and no model is called.
+
+Exit codes:
+  0    success
+  1    failed
+  2    invalid arguments; nothing was run

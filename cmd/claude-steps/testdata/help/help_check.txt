@@ -1,0 +1,49 @@
+Usage: claude-steps check
+
+Test the reader's rules against the last week of transcripts.
+
+Claude Code treats its transcript format as internal and changes it without
+notice, and a reader that no longer fits it shows fewer steps with nothing
+to say so. check reads every transcript changed in the last 7 days as the
+views do (an older one is not read), and counts each fact two ways: by the
+reader's own rule, and by a second trace that should exist whenever the
+first does, such as a slash command's expansion row or the URL gh printed
+for a pull request. It prints how many transcripts it read and what it
+could not, then a table with a row per fact: the reader's count, the second
+count, the misses, the sessions they were in, and both rules. The facts are
+named as a view's "the reader may have missed …" line names them.
+
+Run it after a Claude Code update, before trusting a view. It exits 1 after
+the report when the format may have changed: a transcript cannot be read, a
+line does not decode, no transcript holds a message the reader recognises,
+or the reader missed more than one in 10 of a fact's second traces; a
+single view may warn of a miss that stays within that over the week. The
+reader's rules, in claude-steps' own source, then need fixing, and until
+they are, a view may lack the facts the report names, so do not read their
+absence as nothing having happened. It exits 1 with nothing on stdout when the transcripts cannot all
+be listed.
+
+Inherited flags:
+  -h, --help    Show context-sensitive help.
+
+Files:
+  ~/.config/claude-steps/config.toml
+      Under $XDG_CONFIG_HOME when that is set. Each [[label]] table is a stage:
+      its name; the skills, snippets (keys of TabType snippets, prompts kept
+      in a file to paste whole) and jobs (envoy job-name prefixes) that count
+      as it; count_commits, to count the commits
+      made since its latest step; and color. The projects_dir key moves the
+      transcripts, and the snippets key lists the TabType files. With no file
+      there are no labels, and a session view prints its full history.
+  ~/.claude/projects/
+      The transcripts, opened read-only. A subagent's own transcript is not
+      read.
+  ~/.local/state/claude-steps/notes/<session id>.jsonl
+      Your notes, one JSON note per line; under $XDG_STATE_HOME when that is
+      set. They are the only files written: nothing reaches a session, no key
+      is sent to its pane, and no model is called.
+
+Exit codes:
+  0    success
+  1    failed
+  2    invalid arguments; nothing was run

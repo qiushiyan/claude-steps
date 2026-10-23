@@ -1,0 +1,5 @@
+work:1.1  12m  The calendar walks days once
+work:1.2  3h   app
+work:2.1  ·    no transcript  session cccccccc
+work:2.2  ·    transcript unreadable  session dddddddd
+work:3.1  3h   ! app

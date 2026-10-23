@@ -1,0 +1,14 @@
+[1mThe calendar walks days once[0m   [2maaaaaaaa[0m
+[36m [0mwork:1.1
+[34m [0m[34m/work/app[0m   [35m [0m[35mfeat/thing[0m
+[2m [0m1 compaction, last 2 hours ago
+[2m [0mlast message 12 minutes ago
+[32m [0m[32mPR #7145 opened here[0m
+https://github.com/acme/app/pull/7145
+[2m────────────────────────────────────────[0m
+[34mreview[0m    2h    [1m+1[0m   review-r2 envoy sa…
+[35mverify[0m    16m   +0   skill pl-loopy-ver…
+[36mprompts[0m   13m        read skills/prompt…
+
+[2mnotes[0m   now   a second note
+        1m    --a note that reads like…

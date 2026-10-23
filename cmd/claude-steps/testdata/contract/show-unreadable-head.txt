@@ -1,0 +1,4 @@
+session dddddddd   dddddddd   work:2.2
+transcript unreadable  ~/.claude/projects/-work-app/dddddddd-4444-4444-8444-444444444444.jsonl
+────────────────────────────────────────────────────────────────────────
+notes   none

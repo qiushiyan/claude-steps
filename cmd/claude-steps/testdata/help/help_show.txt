@@ -1,0 +1,145 @@
+Usage: claude-steps show [<session>] [flags]
+
+Print one session: its labels, its notes and its steps.
+
+Open it to learn whether a labelled stage ran in the session, when, and what
+was committed since. The view is the session's head, then its steps, newest
+first. --head and --no-head print the two apart, for a popup that lays them
+side by side; --no-head still opens with any line that says what the view
+may lack, so it stands alone.
+
+A prompt is a message you typed or pasted into the session. A request is a
+prompt that asked for a labelled skill: a pasted snippet, a slash command,
+or words that name the skill.
+
+The head:
+  - the title, the short session id and the pane; the directory, the branch,
+    the compactions and when the transcript last had a message; and each pull
+    request the session opened or linked, with its link. No PR there means
+    the reader found none.
+  - what the reader could not read or may have missed: "no transcript",
+    "transcript unreadable", "3 lines could not be read", or "the reader may
+    have missed pull request (claude-steps check)", which says a second count
+    of that fact saw more than the reader did. Such a view may lack steps,
+    and that fact in particular, so it is no evidence that nothing ran; run
+    claude-steps check to see whether the format moved; when it finds no
+    drift, the miss is this session's alone. With no transcript the steps
+    are your notes, which outlive it.
+  - a row per label: when its latest step happened, the commits the session
+    made since, for a label that counts them (empty for one that does not),
+    and the step; for an envoy round, the time and the count run from its
+    dispatch. "·" when the label has no step. Only the session's own git
+    commit calls are counted, not the repository's history.
+  - your latest notes, three of them unless --all is given.
+
+The steps, under "steps · newest first", are what happened under each label,
+each with the request that asked for it, and your notes at the time you wrote
+them. The commits between two steps are one count line. The last line says
+how many rows the full history (--all) holds, and how many reads of a
+skill's file no step shows. A step reads:
+
+  /review  args            a slash command you typed that loaded a skill
+  skill review  args       the model called the Skill tool; "failed to load"
+                           when the call returned an error
+  read skills/x/SKILL.md   the model read a skill's file in answer to a
+                           request; a read made to look something up is in
+                           the history alone
+  pasted <key>             a prompt that holds the opening of the TabType
+                           snippet <key>; "in a file" when the snippet came
+                           in the file that a prompt "Read <path> and do
+                           what it asks." named
+  you: "…"                 a prompt that named a labelled skill: your words,
+                           not a run
+  <request> → <what ran>   what ran, after the request that asked for it. A
+                           run with no → is one the reader found no request
+                           for, most often asked for in words it does not
+                           match; a request on a line of its own is one
+                           nothing under the label answered
+  review-r1                an envoy round, dated at its dispatch, so the
+                           commits above it are ones its reviewer did not
+                           read. After the name, what went wrong, if
+                           anything: "envoy said <word>", envoy's own word
+                           for a job that did not end ok, such as partial or
+                           timeout; "collect returned an error"; "run
+                           returned an error". envoy's ok says a result came
+                           back, not that a review passed, and is not printed
+  … (3 times)              the same line under the same labels, at the time
+                           of its last
+
+The full history, under "history · newest first", lists every line the
+reader found, each with the labels it is under: besides the steps,
+"commit  <subject>" for each git commit in a call that returned no error,
+"PR #12 opened here" or "linked", "compaction (manual)", and a round's
+"dispatched" and "collected" apart. A commit made by a subagent, by git
+merge, rebase or cherry-pick, or inside a script is not seen.
+
+Arguments:
+  <session>        A pane id such as %12, a session id, or at least its first eight characters; the pane show runs in when omitted (optional; env: $TMUX_PANE).
+
+Flags:
+      --all        Print the full history in place of the steps; with --head, list every note.
+      --json       Print the session as one JSON object (see JSON).
+      --head       Print only the head: the session, its labels and its notes.
+      --no-head    Print only the steps, or with --all the history, without the "steps · newest first" line.
+
+Inherited flags:
+  -h, --help       Show context-sensitive help.
+
+Constraints:
+  At most one of --json, --head, --no-head.
+
+Files:
+  ~/.config/claude-steps/config.toml
+      Under $XDG_CONFIG_HOME when that is set. Each [[label]] table is a stage:
+      its name; the skills, snippets (keys of TabType snippets, prompts kept
+      in a file to paste whole) and jobs (envoy job-name prefixes) that count
+      as it; count_commits, to count the commits
+      made since its latest step; and color. The projects_dir key moves the
+      transcripts, and the snippets key lists the TabType files. With no file
+      there are no labels, and a session view prints its full history.
+  ~/.claude/projects/
+      The transcripts, opened read-only. A subagent's own transcript is not
+      read.
+  ~/.local/state/claude-steps/notes/<session id>.jsonl
+      Your notes, one JSON note per line; under $XDG_STATE_HOME when that is
+      set. They are the only files written: nothing reaches a session, no key
+      is sent to its pane, and no model is called.
+
+JSON:
+  One object: id, the full session id; pane and where (session:window.pane),
+  when the session is live in tmux; path, the transcript file; title, cwd, branch and last_at;
+  status, which is ok, partial, unreadable or missing; unread_lines; events,
+  oldest first, each with at, kind (skill, read, snippet, mention, round,
+  commit, pr or compaction) and the fields of its kind; notes, each with at
+  and text; unread_notes, the note lines that could not be read, and
+  notes_error when the notes file cannot be read; pull_requests and
+  compactions, events of those kinds; and labels, each with its name, latest
+  (the label's latest step, as an event, absent when it has none) and
+  commits_since (present when the label counts commits). Every time is RFC
+  3339 with its offset, and none is relative; --all changes nothing here.
+
+Sessions:
+  A session is one Claude Code conversation, named by its session id. Name
+  one by a tmux pane id such as %12 (the session that pane runs), by its full
+  id, or by at least its first eight characters; a live pane's session works
+  by its full id before it has a transcript. Outside tmux, a session's id is
+  its transcript's file name, ~/.claude/projects/<project>/<session id>.jsonl.
+  Resuming a session keeps its id, and so does moving it with /cd. /clear
+  starts a new id, with an empty timeline and no notes; a forked session also
+  gets a new id and no notes, and its timeline starts with the history it
+  copied.
+
+Output:
+  Colour is drawn on a terminal, or through a pipe when CLICOLOR_FORCE is set
+  to anything but 0, and never when NO_COLOR is set; plain output carries no
+  escape codes. A hue names a label, red marks an error the transcript
+  reports or something the reader could not read, bold marks a count of
+  commits that is not zero, and no colour grades a date. COLUMNS, when set,
+  is the width the output fits; without it, long text is cut at fixed widths.
+  In the head a Nerd Font glyph marks the pane, the directory, the branch and
+  each pull request; plain output has no glyphs.
+
+Exit codes:
+  0    success
+  1    failed
+  2    invalid arguments; nothing was run

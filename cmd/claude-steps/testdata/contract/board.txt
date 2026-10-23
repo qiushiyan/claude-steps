@@ -1,0 +1,6 @@
+pane      session                       review  verify    prompts   PR     note
+work:1.1  The calendar walks days once  2h +1   16m +0    read 13m  #7145  (2) a second note
+work:1.2  app                           ·       named 3h  ·         ·
+work:2.1  session cccccccc              no transcript
+work:2.2  session dddddddd              transcript unreadable
+work:3.1  ! app                         3h +0   ·         ·         ·      [1 line could not be read]

@@ -1,0 +1,54 @@
+Usage: claude-steps note <session> <text> ...
+
+Add a note to a session.
+
+A note is your own dated line on a session, for what its transcript cannot
+say. It shows in the session's head, among its steps at the time you wrote
+it, and in the board's note cell. Nothing is printed when the note is saved.
+The tool only appends; to change or remove a note, edit the session's notes
+file by hand (see Files). An import from another machine that still holds
+the note brings it back.
+
+Arguments:
+  <session>     A pane id such as %12, a session id, or at least its first eight characters.
+  <text> ...    The note's words, joined by spaces; put -- before them when any starts with a dash.
+
+Inherited flags:
+  -h, --help    Show context-sensitive help.
+
+Files:
+  ~/.config/claude-steps/config.toml
+      Under $XDG_CONFIG_HOME when that is set. Each [[label]] table is a stage:
+      its name; the skills, snippets (keys of TabType snippets, prompts kept
+      in a file to paste whole) and jobs (envoy job-name prefixes) that count
+      as it; count_commits, to count the commits
+      made since its latest step; and color. The projects_dir key moves the
+      transcripts, and the snippets key lists the TabType files. With no file
+      there are no labels, and a session view prints its full history.
+  ~/.claude/projects/
+      The transcripts, opened read-only. A subagent's own transcript is not
+      read.
+  ~/.local/state/claude-steps/notes/<session id>.jsonl
+      Your notes, one JSON note per line; under $XDG_STATE_HOME when that is
+      set. They are the only files written: nothing reaches a session, no key
+      is sent to its pane, and no model is called.
+
+Examples:
+  claude-steps note %12 skip verify, the spike covered it
+  claude-steps note 9ba78130 -- --force was needed for the rebase
+
+Sessions:
+  A session is one Claude Code conversation, named by its session id. Name
+  one by a tmux pane id such as %12 (the session that pane runs), by its full
+  id, or by at least its first eight characters; a live pane's session works
+  by its full id before it has a transcript. Outside tmux, a session's id is
+  its transcript's file name, ~/.claude/projects/<project>/<session id>.jsonl.
+  Resuming a session keeps its id, and so does moving it with /cd. /clear
+  starts a new id, with an empty timeline and no notes; a forked session also
+  gets a new id and no notes, and its timeline starts with the history it
+  copied.
+
+Exit codes:
+  0    success
+  1    failed
+  2    invalid arguments; nothing was run

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,9 +58,7 @@ func (t *Transcript) Raw(row Row) *Transcript {
 func (t *Transcript) row(kind string, fields Row) Row {
 	row := Row{"type": kind, "uuid": t.id("uuid"), "timestamp": t.stamp(), "isSidechain": false,
 		"cwd": "/work/app", "gitBranch": "feat/thing", "sessionId": "fixture", "version": "2.1.287"}
-	for k, v := range fields {
-		row[k] = v
-	}
+	maps.Copy(row, fields)
 	t.Rows = append(t.Rows, row)
 	return row
 }
@@ -149,9 +148,7 @@ func (t *Transcript) toolUse(name string, input Row) string {
 
 func (t *Transcript) toolResult(id, text string, isError bool, extra Row) {
 	fields := Row{"message": Row{"role": "user", "content": []Row{{"type": "tool_result", "tool_use_id": id, "content": text, "is_error": isError}}}}
-	for k, v := range extra {
-		fields[k] = v
-	}
+	maps.Copy(fields, extra)
 	t.row("user", fields)
 }
 

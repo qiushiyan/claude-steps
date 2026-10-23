@@ -1,0 +1,14 @@
+  [2mnote[0m      now   a second note
+  [2mnote[0m      1m    --a note that reads like an option
+  [36mprompts[0m   13m   read skills/prompt-engineering/SKILL.md
+  [35mverify[0m    16m   skill pl-loopy-verify  local spikes
+  [36mprompts[0m   17m   you: "then hold the new prompts to prompt-engineering"
+            2h    PR #7145 opened here  acme/app
+            2h    commit  docs: the stories on the local rig
+            2h    [2mcompaction (manual)[0m
+  [34mreview[0m    2h    review-r2  collected, envoy said partial
+  [34mreview[0m    2h    review-r2  dispatched
+  [34mreview[0m    3h    review-r1  collected
+            3h    commit  the calendar walks days once (review r1)
+  [34mreview[0m    3h    review-r1  dispatched
+  [34mreview[0m    3h    /review  codex full review

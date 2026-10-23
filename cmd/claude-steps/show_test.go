@@ -555,7 +555,7 @@ func TestTheHistoryCountSaysTheReadsNoStepShows(t *testing.T) {
 
 	w.env = map[string]string{"COLUMNS": "40"}
 	out = w.ok("show", id)
-	for _, row := range strings.Split(out, "\n") {
+	for row := range strings.SplitSeq(out, "\n") {
 		if screen.StringWidth(row) > 40 {
 			t.Errorf("a row takes %d columns:\n%s", screen.StringWidth(row), row)
 		}
@@ -650,7 +650,7 @@ func TestTheSessionViewFitsTheWidth(t *testing.T) {
 	w.env = map[string]string{"COLUMNS": "90"}
 	for _, args := range [][]string{{"show", id}, {"show", id, "--all"}} {
 		out := w.ok(args...)
-		for _, row := range strings.Split(out, "\n") {
+		for row := range strings.SplitSeq(out, "\n") {
 			if screen.StringWidth(row) > 90 {
 				t.Errorf("%v: a row takes %d columns:\n%s", args, screen.StringWidth(row), row)
 			}
@@ -718,7 +718,7 @@ func TestANarrowHead(t *testing.T) {
 	w.ok("note", "%1", "the spike covered the verify pass, so skip it until the importer lands on the new schema")
 	w.env = map[string]string{"COLUMNS": "48"}
 	out := w.ok("show", "%1", "--head")
-	for _, row := range strings.Split(out, "\n") {
+	for row := range strings.SplitSeq(out, "\n") {
 		if screen.StringWidth(row) > 48 {
 			t.Errorf("a row takes %d columns:\n%s", screen.StringWidth(row), row)
 		}
@@ -775,7 +775,7 @@ func TestTheHeadFitsTheSideColumn(t *testing.T) {
 
 	w.env = map[string]string{"COLUMNS": "44"}
 	head := w.ok("show", id, "--head")
-	for _, row := range strings.Split(head, "\n") {
+	for row := range strings.SplitSeq(head, "\n") {
 		if screen.StringWidth(row) > 44 {
 			t.Errorf("a row takes %d columns:\n%s", screen.StringWidth(row), row)
 		}
@@ -790,7 +790,7 @@ func TestTheHeadFitsTheSideColumn(t *testing.T) {
 	lacks(t, head, "spike-review-r1")
 	w.env["CLICOLOR_FORCE"] = "1"
 	painted := w.ok("show", id, "--head")
-	for _, row := range strings.Split(escape.ReplaceAllString(painted, ""), "\n") {
+	for row := range strings.SplitSeq(escape.ReplaceAllString(painted, ""), "\n") {
 		if screen.StringWidth(row) > 44 {
 			t.Errorf("a painted row takes %d columns:\n%s", screen.StringWidth(row), row)
 		}
@@ -799,7 +799,7 @@ func TestTheHeadFitsTheSideColumn(t *testing.T) {
 	// Narrower than a marked item, the item folds under its text, whole.
 	w.env["COLUMNS"] = "30"
 	narrow := escape.ReplaceAllString(w.ok("show", id, "--head"), "")
-	for _, row := range strings.Split(narrow, "\n") {
+	for row := range strings.SplitSeq(narrow, "\n") {
 		if screen.StringWidth(row) > 30 {
 			t.Errorf("a painted row takes %d columns:\n%s", screen.StringWidth(row), row)
 		}

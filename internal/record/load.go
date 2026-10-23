@@ -15,6 +15,7 @@ import (
 
 	"github.com/qiushiyan/claude-steps/internal/config"
 	"github.com/qiushiyan/claude-steps/internal/notes"
+	"github.com/qiushiyan/claude-steps/internal/panes"
 )
 
 var (
@@ -214,6 +215,60 @@ func (l *Loader) Resolve(token string) (string, error) {
 		return ids[0], nil
 	}
 	return "", fmt.Errorf("%s matches %d sessions, give more of the id:\n  %s", token, len(ids), strings.Join(ids, "\n  "))
+}
+
+// Live keeps the panes that run a Claude session: those whose session id is
+// well formed.
+func Live(all []panes.Pane) []panes.Pane {
+	var out []panes.Pane
+	for _, p := range all {
+		if IsSessionID(p.SessionID) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// Target turns what the user typed into a session, with its pane when it is
+// live. A pane id such as %12 names the session its pane runs; anything else
+// is resolved as a session id. list asks tmux for its panes; the pane is only
+// for display, so a session id resolves without a tmux server.
+func (l *Loader) Target(token string, list func() ([]panes.Pane, error)) (string, *panes.Pane, error) {
+	var live []panes.Pane
+	all, err := list()
+	if err == nil {
+		live = Live(all)
+	}
+	if strings.HasPrefix(token, "%") {
+		if err != nil {
+			return "", nil, err
+		}
+		for _, p := range live {
+			if p.ID == token {
+				return p.SessionID, &p, nil
+			}
+		}
+		return "", nil, fmt.Errorf("pane %s has no Claude session", token)
+	}
+	// A live session has no transcript before its first prompt, and the
+	// popup addresses it by its full id.
+	if IsSessionID(token) {
+		for _, p := range live {
+			if p.SessionID == token {
+				return token, &p, nil
+			}
+		}
+	}
+	id, err := l.Resolve(token)
+	if err != nil {
+		return "", nil, err
+	}
+	for _, p := range live {
+		if p.SessionID == id {
+			return id, &p, nil
+		}
+	}
+	return id, nil, nil
 }
 
 // Recent lists the sessions whose transcript changed at or after since. A

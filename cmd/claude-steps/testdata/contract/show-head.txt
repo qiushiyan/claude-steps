@@ -1,0 +1,9 @@
+The calendar walks days once   aaaaaaaa   work:1.1
+/work/app   feat/thing   1 compaction, last 2 hours ago   last message 12 minutes ago   PR #7145 opened here  https://github.com/acme/app/pull/7145
+────────────────────────────────────────────────────────────────────────
+review    2 hours ago      1 commit since    review-r2 envoy said partial
+verify    16 minutes ago   0 commits since   skill pl-loopy-verify local spikes
+prompts   13 minutes ago                     read skills/prompt-engineering/SKILL.md
+
+notes   now            a second note
+        1 minute ago   --a note that reads like an option

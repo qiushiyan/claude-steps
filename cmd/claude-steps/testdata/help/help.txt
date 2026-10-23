@@ -1,0 +1,60 @@
+Usage: claude-steps <command>
+
+claude-steps shows what has happened in Claude Code sessions, read from their transcript files.
+
+A session's transcript records what ran in it: skills loaded, review rounds
+handed to another model through envoy and collected, commits, pull requests
+and compactions. claude-steps reads it from outside the session and dates
+each fact under your labels, the stages such as review that the
+configuration names, so you can tell which stages a session has been
+through and what was committed since without asking it: a question costs
+the session a turn and can set its model working.
+
+Everything it prints is a dated fact, never a verdict. "review 2 hours ago,
+1 commit since" is for you to judge; nothing says a check finished, passed
+or still covers the code.
+
+Flags:
+  -h, --help    Show context-sensitive help.
+
+Commands:
+  show [<session>]             Print one session: its labels, its notes and its steps.
+  board                        Print a row for each Claude session running in tmux.
+  note <session> <text> ...    Add a note to a session.
+  check                        Test the reader's rules against the last week of transcripts.
+  import-notes <session-id>    Merge the notes another machine kept for a session, read on stdin.
+
+Sessions:
+  A session is one Claude Code conversation, named by its session id. Name
+  one by a tmux pane id such as %12 (the session that pane runs), by its full
+  id, or by at least its first eight characters; a live pane's session works
+  by its full id before it has a transcript. Outside tmux, a session's id is
+  its transcript's file name, ~/.claude/projects/<project>/<session id>.jsonl.
+  Resuming a session keeps its id, and so does moving it with /cd. /clear
+  starts a new id, with an empty timeline and no notes; a forked session also
+  gets a new id and no notes, and its timeline starts with the history it
+  copied.
+
+Files:
+  ~/.config/claude-steps/config.toml
+      Under $XDG_CONFIG_HOME when that is set. Each [[label]] table is a stage:
+      its name; the skills, snippets (keys of TabType snippets, prompts kept
+      in a file to paste whole) and jobs (envoy job-name prefixes) that count
+      as it; count_commits, to count the commits
+      made since its latest step; and color. The projects_dir key moves the
+      transcripts, and the snippets key lists the TabType files. With no file
+      there are no labels, and a session view prints its full history.
+  ~/.claude/projects/
+      The transcripts, opened read-only. A subagent's own transcript is not
+      read.
+  ~/.local/state/claude-steps/notes/<session id>.jsonl
+      Your notes, one JSON note per line; under $XDG_STATE_HOME when that is
+      set. They are the only files written: nothing reaches a session, no key
+      is sent to its pane, and no model is called.
+
+Exit codes:
+  0    success
+  1    failed
+  2    invalid arguments; nothing was run
+
+Run "claude-steps <command> --help" for a command's details.

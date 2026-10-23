@@ -242,7 +242,7 @@ func TestColourIsTheSameTextPainted(t *testing.T) {
 			t.Errorf("%v: the painted text differs from the plain:\n%s\n%s", args, got, bare)
 		}
 	}
-	for _, row := range strings.Split(strings.TrimRight(w.ok("board", "--ids")+w.ok("board", "--ids", "--brief"), "\n"), "\n") {
+	for row := range strings.SplitSeq(strings.TrimRight(w.ok("board", "--ids")+w.ok("board", "--ids", "--brief"), "\n"), "\n") {
 		if fields := strings.SplitN(row, "\t", 3); len(fields) != 3 || strings.Contains(fields[0]+fields[1], "\x1b") {
 			t.Errorf("an id field is not bare: %q", row)
 		}

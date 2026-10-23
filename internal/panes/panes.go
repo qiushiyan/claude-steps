@@ -25,8 +25,7 @@ const format = "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{@cl
 func List() ([]Pane, error) {
 	out, err := exec.Command("tmux", "list-panes", "-a", "-F", format).Output()
 	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
+		if _, ok := errors.AsType[*exec.ExitError](err); ok {
 			return nil, ErrNoServer
 		}
 		return nil, fmt.Errorf("cannot run tmux: %w", err)

@@ -256,7 +256,7 @@ func clip(s string, n int) string {
 // than n is broken across lines, so no word is lost.
 func wrap(s string, n int) []string {
 	var lines []string
-	for _, word := range strings.Fields(s) {
+	for word := range strings.FieldsSeq(s) {
 		if k := len(lines); k > 0 && width(lines[k-1])+1+width(word) <= n {
 			lines[k-1] += " " + word
 			continue

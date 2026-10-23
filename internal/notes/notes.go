@@ -85,7 +85,7 @@ func (s Store) Load(id string) (notes []Note, bad int, err error) {
 	// Two imports that raced can each append the same note, interleaved
 	// with others at the same time; it is read once.
 	seen := map[string]bool{}
-	for _, line := range bytes.Split(data, []byte{'\n'}) {
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
@@ -125,7 +125,7 @@ func (s Store) Import(id string, r io.Reader) (added, bad int, err error) {
 		return 0, 0, err
 	}
 	var out []byte
-	for _, line := range bytes.Split(data, []byte{'\n'}) {
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
