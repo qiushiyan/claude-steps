@@ -46,6 +46,15 @@ Nothing persists between invocations except the notes.
 
 ## Who owns what
 
+- **`cmd/claude-steps`:** the command line, declared once as Kong structs and
+  run through clikit, so a command's usage, flags, constraints and exit
+  codes in its help come from the declaration that parses its argv; its
+  `Help()` and sections carry the prose an agent reads, pinned in
+  `cmd/claude-steps/testdata/help`. A command translates its flags into
+  calls on `record` and `render` and decides nothing. The clock, tmux's
+  panes and whether stdout is a terminal reach it as one bound `host`, which
+  the tests replace, and the configuration is read only by a command that
+  runs, so a broken file cannot hide the help.
 - **`internal/record/decode.go`:** every fact about transcript row shapes.
   Claude Code documents the format as internal, so a format change is
   repaired here and nowhere else. Rows are decoded as JSON structurally; no
@@ -68,7 +77,10 @@ Nothing persists between invocations except the notes.
   variable assigned on a branch decided at run time reads as its source text
   after the branch, since either value may hold.
 - **`internal/record/load.go`:** where transcripts live, the read status, and
-  turning what the user typed into a session id.
+  turning what the user typed into a session (`Loader.Target`): a pane id
+  names its pane's session, a live pane's full session id is a session
+  before its transcript exists, and anything else is an id or a prefix of
+  one.
 - **`internal/record/labels.go`:** which labels an event is under
   (`LabelsOf`, `belongs`), and a label's state: its latest step and the
   commits since. A label is a board column with no state, and labels are not
@@ -80,6 +92,11 @@ Nothing persists between invocations except the notes.
   merged by event, so a run under two labels that a round of one takes is
   still a step under the other. Render formats the steps and decides none of
   them.
+- **`internal/record/survey.go`:** what `check` decides. It reads a week of
+  transcripts through `Load`, sums each signal, and names the drift: a
+  transcript it cannot read, a line that does not decode, no conversation
+  row anywhere, or more misses than `MissTolerance` allows. `render.Survey`
+  prints the report.
 - **`internal/config`:** which files hold snippets, and what a snippet is
   reduced to: its key and the opening of its text. `loadSnippets` is the one
   reader of TabType's file. The set is built from the configuration alone
@@ -398,6 +415,10 @@ Nothing persists between invocations except the notes.
 
 ## Contracts other repositories depend on
 
+`TestContracts` (`cmd/claude-steps/contract_test.go`) pins the output below
+byte for byte on fixtures, in `cmd/claude-steps/testdata/contract`; a file
+there that changes changes what a caller reads.
+
 - **`board --ids` rows:** `<pane id> TAB <session id> TAB <text>`, both ids
   empty on the header line. The popup parses them from `board --ids --brief`,
   which has no header line. The text may carry escape codes; the ids never
@@ -405,7 +426,12 @@ Nothing persists between invocations except the notes.
 - **`show --head`, `show --no-head [--all]` and `show [--all]`:** the
   popup's status, its main panel, and the stacked panel that holds both.
   `show --no-head` opens with what the view may lack, so the main panel
-  stands on its own.
+  stands on its own. Rex's steps sidecar (`rex/.config/rex/scripts/steps.lua`
+  in the dotfiles) shows `show` beside an agent.
+- **`show --json` and `board --json`:** one JSON document each, every time
+  RFC 3339. Rex's board (`rex/.config/rex/scripts/board.lua`) reads a
+  session's title and branch from `show <id> --json`. The keys are listed
+  in `show --help`, and `TestTheJSONIsDescribed` fails when one is not.
 - **The environment the popup sets:** `CLICOLOR_FORCE=1` asks for colour
   through a pipe and `COLUMNS` is the width a line may fill; `NO_COLOR` wins
   over both.
@@ -418,7 +444,7 @@ Nothing persists between invocations except the notes.
 - **The notes file and `import-notes`:**
   `$XDG_STATE_HOME/claude-steps/notes/<id>.jsonl`, one JSON note per line.
   `claude-tomini` sends a moved session's file to `claude-steps import-notes`
-  on the mini.
+  on the mini, and takes a non-zero exit as notes that did not all arrive.
 - **The configuration keys:** the labels, the hue each may name and the
   snippet files live in the dotfiles `claude-steps` package. A binary
   refuses a key it does not know and a value of another type, so a new one
@@ -434,6 +460,12 @@ Nothing persists between invocations except the notes.
 
 ## Changing it
 
+- **A command, a flag or a help page:** change the command's struct in
+  `cmd/claude-steps/main.go`, its tags for what generated help states and
+  `Help()` for the prose, then `make golden` and review the pages' diff as
+  code. The pages are what an agent learns the tool from, so each says what
+  a reader holding only it needs, and nothing the declaration already
+  states.
 - **Claude Code changed a row shape:** fix the rule in `decode.go`, add the
   shape to `internal/fixture`, pin it with a case in
   `internal/record/record_test.go`, then run `claude-steps check`.

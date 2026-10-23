@@ -20,11 +20,12 @@ is what the user sees.
   `internal/fixture` and run under a temporary `HOME`; no private transcript
   is committed, and this repository is public.
 - **Contract changes cross repositories.** `board --ids --brief`, `show`,
-  `show --head`, `show --no-head`, the colour and width environment, the
-  notes file, `import-notes` and the configuration keys are used by
-  `~/dotfiles` (`tmux-steps.sh`, `claude-tomini`, the `claude-steps`
-  package), and the reader matches the pointer sentence drive-session's
-  `send-turn` types.
+  `show --head`, `show --no-head`, `show --json`, the colour and width
+  environment, the notes file, `import-notes` and the configuration keys are
+  used by `~/dotfiles` (`tmux-steps.sh`, rex's steps sidecar and board,
+  `claude-tomini`, the `claude-steps` package), and the reader matches the
+  pointer sentence drive-session's `send-turn` types. `TestContracts` pins
+  that output byte for byte.
   `docs/design.md` § Contracts other repositories depend on.
 - Callers run `claude-steps` from PATH. Run `make check` before shipping and
   `make install` after: a source edit alone leaves the popup on the old

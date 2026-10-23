@@ -42,18 +42,23 @@ covers the code: "review, 2 hours ago, 1 commit since" is for you to judge.
 
 ## Commands
 
-```text
-claude-steps show [<pane>|<session>] [--all] [--json|--head|--no-head]   one session: its labels, notes and steps
-claude-steps board [--json] [--ids] [--brief]                           every Claude pane in tmux, one row each
-claude-steps note <pane>|<session> <text…>                              append a note to a session
-claude-steps check                                                      test the reader against recent transcripts
-claude-steps import-notes <session id>                                  merge notes from another machine, read on stdin
-```
+- **`claude-steps show [<session>]`:** one session: its labels, notes and
+  steps.
+- **`claude-steps board`:** every Claude pane in tmux, one row each.
+- **`claude-steps note <session> <text…>`:** append a note to a session; put
+  `--` before text in which a word starts with a dash.
+- **`claude-steps check`:** test the reader against the last week's
+  transcripts.
+- **`claude-steps import-notes <session id>`:** merge notes from another
+  machine, read on stdin.
 
-`<pane>` is a tmux pane id such as `%12`; `show` defaults to the pane it runs
-in. `<session>` is a session id or its first eight or more characters; a
-live pane's full session id works before the session has a transcript.
-`claude-steps --help` has the rest.
+`claude-steps <command> --help` prints a command's page: its arguments and
+flags, what its output says, and its exit codes. A mistake in the arguments
+exits 2 and runs nothing.
+
+`<session>` is a tmux pane id such as `%12`, a session id, or at least its
+first eight characters; `show` defaults to the pane it runs in, and a live
+pane's full session id works before the session has a transcript.
 
 `board` finds Claude panes through the tmux pane option `@claude_ctx_sid`.
 Without something setting it, the board is empty and `show <session id>`
@@ -248,7 +253,8 @@ the history it copied.
 ## Development
 
 ```sh
-make check     # tests with the race detector, vet, gofmt
+make check     # vet, go fix -diff, tests with the race detector, gofmt
+make golden    # rewrite the help pages after an intended change; review the diff
 make install   # build into ~/.local/bin
 ```
 
