@@ -88,9 +88,17 @@ func goList(t *testing.T, args ...string) []string {
 	return strings.Fields(string(out))
 }
 
+// parseOnly are the packages under net/ that parse values and open nothing:
+// a connection needs package net itself. Kong's URL mapper links net/url,
+// which links net/netip.
+var parseOnly = map[string]bool{"net/url": true, "net/netip": true}
+
 // Obligation 15: the binary cannot reach a network, so it cannot call a model.
 func TestNoNetworkInTheBinary(t *testing.T) {
 	for _, pkg := range goList(t, "-deps", ".") {
+		if parseOnly[pkg] {
+			continue
+		}
 		if pkg == "net" || strings.HasPrefix(pkg, "net/") || strings.HasPrefix(pkg, "crypto/tls") {
 			t.Errorf("the binary links %s", pkg)
 		}

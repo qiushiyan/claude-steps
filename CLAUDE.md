@@ -5,7 +5,9 @@ its transcript. Read `docs/design.md` before changing behaviour; `README.md`
 is what the user sees.
 
 - **Nothing may reach a session.** No write under the projects directory, no
-  keys sent to a pane, no network package, no process but `tmux list-panes`.
+  keys sent to a pane, no package that opens a connection (`net` itself; the
+  parse-only `net/url` and `net/netip` that Kong links are allowed), no process
+  but `tmux list-panes`.
   `TestOnlyTheNotesAreWritten`, `TestNoNetworkInTheBinary` and
   `TestOneReaderAndOneReadOnlyProcess` hold this; a change that needs one of
   them loosened is a design change, not a fix.

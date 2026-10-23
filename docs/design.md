@@ -9,8 +9,9 @@ tells the model nothing.
 
 - **No handle on a session.** Transcripts are opened read-only, the only
   writes are the user's notes, the only process started is `tmux list-panes`,
-  and the binary links no network package. Any write path into a session is a
-  way to change what its model reads.
+  and the binary links nothing that can open a connection: package `net` stays
+  out of its import graph (Kong's `net/url` and `net/netip` only parse). Any
+  write path into a session is a way to change what its model reads.
 - **Dated facts, never verdicts.** A line says what the transcript holds and
   when. An invocation does not prove a check finished or still covers the
   code, so nothing prints a tick, "done" or "stale"; the user judges. Colour
