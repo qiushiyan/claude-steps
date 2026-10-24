@@ -51,7 +51,10 @@ Nothing persists between invocations except the notes.
   run through clikit, so a command's usage, flags, constraints and exit
   codes in its help come from the declaration that parses its argv; its
   `Help()` and sections carry the prose an agent reads, pinned in
-  `cmd/claude-steps/testdata/help`. A command translates its flags into
+  `cmd/claude-steps/testdata/help`. How help renders and how an argv error
+  reads belong to clikit (`~/dev/clikit`), shared by every Go CLI here: a
+  change there is a clikit release, then a version bump in `go.mod` reviewed
+  through those pages. A command translates its flags into
   calls on `record` and `render` and decides nothing. The clock, tmux's
   panes and whether stdout is a terminal reach it as one bound `host`, which
   the tests replace, and the configuration is read only by a command that
