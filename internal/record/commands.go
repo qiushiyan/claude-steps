@@ -108,10 +108,11 @@ func shortCluster(arg string, last byte) bool {
 	return true
 }
 
-// Options of `envoy run` that take a separate value.
+// Options of `envoy run` that take a separate value. envoy accepts them
+// before the job as well as after it, so a missing one is read as the job.
 var envoyValueFlags = map[string]bool{
-	"--with": true, "--prompt-file": true, "--timeout-min": true, "--cwd": true,
-	"--baseline": true, "--max-budget-usd": true, "--base": true,
+	"--with": true, "--prompt-file": true, "--instructions-file": true, "--timeout-min": true,
+	"--cwd": true, "--baseline": true, "--max-budget-usd": true, "--base": true,
 }
 
 // named reports whether a job argument is a name the text gives.

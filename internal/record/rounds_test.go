@@ -288,3 +288,13 @@ func TestARunIsReadAgainstWhatEnvoyPrinted(t *testing.T) {
 	tr.BashError(run+"; false", started+"status: ok\n")
 	want(t, load(t, tr), "round | review-r1 | dispatched")
 }
+
+// envoy 0.15 takes options before the job as well as after it, so the job is
+// the first word that is neither an option nor the value of one — including
+// --instructions-file, which opens a conversation.
+func TestRunWithOptionsBeforeTheJob(t *testing.T) {
+	tr := fixture.New()
+	tr.Bash("envoy run --instructions-file rules.md --with codex --prompt-file b.md review-r1", "Command running in background")
+	tr.Bash("envoy run --with=codex --timeout-min=30 consult-r1 --prompt-file c.md", "Command running in background")
+	want(t, load(t, tr), "round | review-r1 | dispatched", "round | consult-r1 | dispatched")
+}
