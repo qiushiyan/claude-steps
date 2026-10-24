@@ -47,6 +47,14 @@ Inherited flags:
 Constraints:
   At most one of --json, --brief.
 
+Output:
+  Colour is drawn on a terminal, or through a pipe when CLICOLOR_FORCE is set
+  to anything but 0, and never when NO_COLOR is set; plain output carries no
+  escape codes. A hue names a label, red marks an error the transcript
+  reports or something the reader could not read, bold marks a count of
+  commits that is not zero, and no colour grades a date. COLUMNS, when set,
+  is the width the output fits; without it, long text is cut at fixed widths.
+
 Files:
   ~/.config/claude-steps/config.toml
       Under $XDG_CONFIG_HOME when that is set. Each [[label]] table is a stage:
@@ -63,14 +71,6 @@ Files:
       Your notes, one JSON note per line; under $XDG_STATE_HOME when that is
       set. They are the only files written: nothing reaches a session, no key
       is sent to its pane, and no model is called.
-
-Output:
-  Colour is drawn on a terminal, or through a pipe when CLICOLOR_FORCE is set
-  to anything but 0, and never when NO_COLOR is set; plain output carries no
-  escape codes. A hue names a label, red marks an error the transcript
-  reports or something the reader could not read, bold marks a count of
-  commits that is not zero, and no colour grades a date. COLUMNS, when set,
-  is the width the output fits; without it, long text is cut at fixed widths.
 
 Exit codes:
   0    success

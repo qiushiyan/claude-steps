@@ -74,36 +74,21 @@ reader found, each with the labels it is under: besides the steps,
 merge, rebase or cherry-pick, or inside a script is not seen.
 
 Arguments:
-  <session>        A pane id such as %12, a session id, or at least its first eight characters; the pane show runs in when omitted (optional; env: $TMUX_PANE).
+  <session>        A pane id such as %12, a session id, or at least its first eight characters; the
+                   pane show runs in when omitted (optional; env: $TMUX_PANE).
 
 Flags:
       --all        Print the full history in place of the steps; with --head, list every note.
       --json       Print the session as one JSON object (see JSON).
       --head       Print only the head: the session, its labels and its notes.
-      --no-head    Print only the steps, or with --all the history, without the "steps · newest first" line.
+      --no-head    Print only the steps, or with --all the history, without the "steps · newest
+                   first" line.
 
 Inherited flags:
   -h, --help       Show context-sensitive help.
 
 Constraints:
   At most one of --json, --head, --no-head.
-
-Files:
-  ~/.config/claude-steps/config.toml
-      Under $XDG_CONFIG_HOME when that is set. Each [[label]] table is a stage:
-      its name; the skills, snippets (keys of TabType snippets, prompts kept
-      in a file to paste whole) and jobs (envoy job-name prefixes) that count
-      as it; count_commits, to count the commits
-      made since its latest step; and color. The projects_dir key moves the
-      transcripts, and the snippets key lists the TabType files. With no file
-      there are no labels, and a session view prints its full history.
-  ~/.claude/projects/
-      The transcripts, opened read-only. A subagent's own transcript is not
-      read.
-  ~/.local/state/claude-steps/notes/<session id>.jsonl
-      Your notes, one JSON note per line; under $XDG_STATE_HOME when that is
-      set. They are the only files written: nothing reaches a session, no key
-      is sent to its pane, and no model is called.
 
 JSON:
   One object: id, the full session id; pane and where (session:window.pane),
@@ -138,6 +123,23 @@ Output:
   is the width the output fits; without it, long text is cut at fixed widths.
   In the head a Nerd Font glyph marks the pane, the directory, the branch and
   each pull request; plain output has no glyphs.
+
+Files:
+  ~/.config/claude-steps/config.toml
+      Under $XDG_CONFIG_HOME when that is set. Each [[label]] table is a stage:
+      its name; the skills, snippets (keys of TabType snippets, prompts kept
+      in a file to paste whole) and jobs (envoy job-name prefixes) that count
+      as it; count_commits, to count the commits
+      made since its latest step; and color. The projects_dir key moves the
+      transcripts, and the snippets key lists the TabType files. With no file
+      there are no labels, and a session view prints its full history.
+  ~/.claude/projects/
+      The transcripts, opened read-only. A subagent's own transcript is not
+      read.
+  ~/.local/state/claude-steps/notes/<session id>.jsonl
+      Your notes, one JSON note per line; under $XDG_STATE_HOME when that is
+      set. They are the only files written: nothing reaches a session, no key
+      is sent to its pane, and no model is called.
 
 Exit codes:
   0    success

@@ -12,7 +12,8 @@ line that is not a note is skipped, and the command exits 1 once the rest
 are added.
 
 Arguments:
-  <session-id>    The session's full id, as board --ids and show --json print it; a prefix is refused, as this machine may hold nothing yet to match it.
+  <session-id>    The session's full id, as board --ids and show --json print it; a prefix is
+                  refused, as this machine may hold nothing yet to match it.
 
 Inherited flags:
   -h, --help      Show context-sensitive help.

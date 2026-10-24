@@ -16,6 +16,21 @@ Arguments:
 Inherited flags:
   -h, --help    Show context-sensitive help.
 
+Examples:
+  claude-steps note %12 skip verify, the spike covered it
+  claude-steps note 9ba78130 -- --force was needed for the rebase
+
+Sessions:
+  A session is one Claude Code conversation, named by its session id. Name
+  one by a tmux pane id such as %12 (the session that pane runs), by its full
+  id, or by at least its first eight characters; a live pane's session works
+  by its full id before it has a transcript. Outside tmux, a session's id is
+  its transcript's file name, ~/.claude/projects/<project>/<session id>.jsonl.
+  Resuming a session keeps its id, and so does moving it with /cd. /clear
+  starts a new id, with an empty timeline and no notes; a forked session also
+  gets a new id and no notes, and its timeline starts with the history it
+  copied.
+
 Files:
   ~/.config/claude-steps/config.toml
       Under $XDG_CONFIG_HOME when that is set. Each [[label]] table is a stage:
@@ -32,21 +47,6 @@ Files:
       Your notes, one JSON note per line; under $XDG_STATE_HOME when that is
       set. They are the only files written: nothing reaches a session, no key
       is sent to its pane, and no model is called.
-
-Examples:
-  claude-steps note %12 skip verify, the spike covered it
-  claude-steps note 9ba78130 -- --force was needed for the rebase
-
-Sessions:
-  A session is one Claude Code conversation, named by its session id. Name
-  one by a tmux pane id such as %12 (the session that pane runs), by its full
-  id, or by at least its first eight characters; a live pane's session works
-  by its full id before it has a transcript. Outside tmux, a session's id is
-  its transcript's file name, ~/.claude/projects/<project>/<session id>.jsonl.
-  Resuming a session keeps its id, and so does moving it with /cd. /clear
-  starts a new id, with an empty timeline and no notes; a forked session also
-  gets a new id and no notes, and its timeline starts with the history it
-  copied.
 
 Exit codes:
   0    success
