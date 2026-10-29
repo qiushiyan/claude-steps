@@ -120,9 +120,10 @@ What a line says:
   command is the `/review  args` line and a `pasted` line at one time, and
   the paste is a step only under a label the run is not under.
 - **`pasted <key>  in a file`:** the same snippet in a file a prompt pointed
-  at: drive-session types `Read <path> and do what it asks.` for a prompt
-  too long to type. It is read from the session's own read of the file, so
-  the file need not still exist, and it is dated at that prompt. The board's
+  at: drive types a prompt too long to type as the file's `@` mention, or,
+  queued mid-turn, as `Read <path> and do what it asks.`. It is read from
+  the file as the session got it, attached or read, so the file need not
+  still exist, and it is dated at that prompt. The board's
   cell says `pasted`.
 - **`you: "…"`:** a prompt that named a labelled skill, or a slash command
   whose words named another: `/review` counts, and so does

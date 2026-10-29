@@ -26,7 +26,7 @@ is what the user sees.
   environment, the notes file, `import-notes` and the configuration keys are
   used by `~/dotfiles` (`tmux-steps.sh`, rex's steps sidecar and board,
   `claude-tomini`, the `claude-steps` package), and the reader matches the
-  pointer sentence drive-session's `send-turn` types. `TestContracts` pins
+  pointers drive types. `TestContracts` pins
   that output byte for byte.
   `docs/design.md` § Contracts other repositories depend on.
 - Callers run `claude-steps` from PATH. Run `make check` before shipping and
