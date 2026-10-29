@@ -89,13 +89,15 @@ var (
 	// Claude Code wraps text the user pasted in this tag. It is the harness's
 	// mark, not the user's words.
 	pastedTag = regexp.MustCompile(`</?pasted_content\b[^>]*>`)
-	// The one line drive-session's send-turn types in place of a prompt too
-	// long to type, which it writes to a file: the prompt is the file.
-	pointerPrompt = regexp.MustCompile(`^Read (/.+) and do what it asks\.$`)
+	// The one line drive types in place of a prompt too long to type, which
+	// it writes to a file: the prompt is the file. It is the file's path as
+	// an @-mention, which Claude Code attaches, or before drive 2026-10-29
+	// and in a step sent mid-turn, a sentence asking for it to be read.
+	pointerPrompt = regexp.MustCompile(`^(?:Read (/.+) and do what it asks\.|@(/\S+))$`)
 	// The second trace for a pointer: any one-line prompt that opens by
-	// asking for a file to be read, so a reworded send-turn reads as missed
-	// pointers rather than as nothing.
-	pointerLike = regexp.MustCompile(`^Read [/~][^\n]*$`)
+	// asking for a file to be read, or that is one mention alone, so a
+	// reworded pointer reads as missed pointers rather than as nothing.
+	pointerLike = regexp.MustCompile(`^(?:Read [/~][^\n]*|@[/~]\S*)$`)
 )
 
 // mention matches a prompt that names a skill without running it.
@@ -321,7 +323,14 @@ func (d *decoder) attachment(at time.Time, dated bool, r row) bool {
 	var kind struct {
 		Type string `json:"type"`
 	}
-	if json.Unmarshal(r.Attachment, &kind) != nil || kind.Type != "queued_command" {
+	if json.Unmarshal(r.Attachment, &kind) != nil {
+		return true
+	}
+	switch kind.Type {
+	case "file":
+		return d.attachedFile(r)
+	case "queued_command":
+	default:
 		return true
 	}
 	var a struct {
@@ -365,6 +374,25 @@ func (d *decoder) attachment(at time.Time, dated bool, r row) bool {
 	}
 	if strings.TrimSpace(text) != "" {
 		d.human(at, text)
+	}
+	return true
+}
+
+// attachedFile reads a file a prompt's @-mention attached, which answers a
+// pointer to it as the session's own read of the file would.
+func (d *decoder) attachedFile(r row) bool {
+	var a struct {
+		Filename string          `json:"filename"`
+		Content  json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(r.Attachment, &a) != nil {
+		return false
+	}
+	if r.IsSidechain || !d.awaits(a.Filename) {
+		return true
+	}
+	if text, whole, ok := pointedText(a.Content, a.Filename); ok {
+		d.readPointed(a.Filename, text, whole)
 	}
 	return true
 }
@@ -655,7 +683,7 @@ func (d *decoder) human(at time.Time, text string) {
 		d.sig.pointer.Second++
 	}
 	if m := pointerPrompt.FindStringSubmatch(t); m != nil {
-		d.pointers = append(d.pointers, &pointer{path: m[1], at: at, prompt: d.prompts})
+		d.pointers = append(d.pointers, &pointer{path: m[1] + m[2], at: at, prompt: d.prompts})
 		return
 	}
 	d.prompt(at, text)
@@ -845,7 +873,7 @@ func (d *decoder) finish() {
 		d.sig.slash.as("skill, typed", "a slash command followed by its expansion / an expansion row with no tool call behind it"),
 		d.sig.tool.as("skill, model call", "a Skill tool call / an expansion row that names a tool call"),
 		d.sig.human.as("human prompt", "a prompt row or a prompt taken mid-turn with origin human / a row whose source is neither sdk nor system, or a prompt taken mid-turn marked as the user's turn"),
-		d.sig.pointer.as("file pointer", "a pointer prompt a read of its file answered / a one-line prompt that opens \"Read <path>\""),
+		d.sig.pointer.as("file pointer", "a pointer prompt a read or attachment of its file answered / a one-line prompt that opens \"Read <path>\" or is one @-mention"),
 		d.sig.round.as("envoy round", "an envoy run or collect in command position / a result of an envoy call holding its job and status lines, or a call whose job neither its text nor its result names"),
 		d.sig.commit.as("commit", "a git commit in command position / a result holding git's commit summary line"),
 		d.sig.pr.as("pull request", "a pull-request link row / a URL returned by gh pr create"),

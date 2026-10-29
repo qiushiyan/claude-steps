@@ -65,6 +65,54 @@ func TestAPasteInAPointedFileIsThePromptsPaste(t *testing.T) {
 	}
 }
 
+// A driver may type the file's path as an @-mention instead, which Claude
+// Code attaches to the prompt: the attachment is the session's read. The
+// mention typed while the session worked is only words, which the session
+// then reads as any pointer. A file the user mentions inside a prompt of
+// their own is part of that prompt, not a pointer, and a mention's own words
+// ask for nothing.
+func TestAMentionedFileIsAPointerTheAttachmentAnswers(t *testing.T) {
+	for name, c := range map[string]struct {
+		send  func(tr *fixture.Transcript)
+		paste bool
+	}{
+		"attached": {func(tr *fixture.Transcript) {
+			tr.Prompt("@"+pointed).AttachedFile(pointed, notice+implementation, 0)
+		}, true},
+		"its start attached, then read": {func(tr *fixture.Transcript) {
+			tr.Prompt("@"+pointed).AttachedFile(pointed, notice, 9).ReadFile(pointed, notice+implementation)
+		}, true},
+		"its start attached only": {func(tr *fixture.Transcript) {
+			tr.Prompt("@"+pointed).AttachedFile(pointed, notice, 9)
+		}, false},
+		"queued, then read": {func(tr *fixture.Transcript) {
+			tr.Prompt("start").Queued("@"+pointed).ReadFile(pointed, notice+implementation)
+		}, true},
+		"another file attached": {func(tr *fixture.Transcript) {
+			tr.Prompt("@"+pointed).AttachedFile("/tmp/driver/scratchpad/s2.md", notice+implementation, 0)
+		}, false},
+	} {
+		tr := fixture.New()
+		c.send(tr)
+		rec := load(t, tr)
+		pasted := len(rec.of(Snippet)) == 1 && rec.of(Snippet)[0].Via == "file"
+		if pasted != c.paste || len(rec.of(Snippet)) > 1 || len(rec.of(Mention)) > 0 {
+			t.Errorf("%s: events %q", name, lines(rec))
+		}
+		if s := signal(rec, "file pointer"); (s.Missed == 0) != c.paste || s.Second != 1 {
+			t.Errorf("%s: %+v", name, s)
+		}
+	}
+
+	tr := fixture.New()
+	tr.Prompt("compare @/work/app/notes.md with the spec").AttachedFile("/work/app/notes.md", implementation, 0)
+	rec := load(t, tr)
+	want(t, rec)
+	if s := signal(rec, "file pointer"); s.Second != 0 {
+		t.Errorf("a mention inside the user's prompt: %+v", s)
+	}
+}
+
 // The file the pointer names is gone by the time most views are drawn; what
 // counts is what the session read. A file that holds no snippet is a prompt
 // that pasted nothing, read whole, and the pointer's own words, a sentence

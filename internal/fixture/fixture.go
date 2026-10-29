@@ -100,6 +100,17 @@ func (t *Transcript) Attached(attachment Row) *Transcript {
 	return t
 }
 
+// AttachedFile is the file a prompt's @-mention attached, as Claude Code
+// 2.1.312 records it: an attachment row after the prompt, holding the file's
+// text as written. total is the file's length in lines; more than the text
+// holds is an attachment of the file's start.
+func (t *Transcript) AttachedFile(path, text string, total int) *Transcript {
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	return t.Attached(Row{"type": "file", "filename": path, "displayPath": path,
+		"content": Row{"type": "text", "file": Row{"filePath": path, "content": text,
+			"numLines": len(lines), "startLine": 1, "totalLines": max(total, len(lines))}}})
+}
+
 // Unsourced is a plain text row with no origin, as an older Claude Code
 // wrote a prompt.
 func (t *Transcript) Unsourced(text string) *Transcript {
